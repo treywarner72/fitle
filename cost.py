@@ -19,24 +19,33 @@ class Cost:
     def __init__(self, x_data, y_data=None):
         self.x = const(x_data)
         self.y = const(y_data) if y_data is not None else None
+        self.fcn = self._base_fcn # Assign the method to the attribute
+
+    def _base_fcn(self, *args):
+        """
+        Placeholder function for base Cost class.
+        Specific cost functions will override the __ror__ behavior.
+        """
+        raise NotImplementedError("This is a base Cost class. Use specific cost function generators like Cost.MSE, Cost.NLL, etc.")
 
     def __ror__(self, model):
-        # This method will be overridden by the specific cost function generators
-        raise NotImplementedError("This is a base Cost class. Use specific cost function generators like Cost.mse, Cost.nll, etc.")
+        ret = self.fcn(model)
+        ret.memory['base'] = model
+        return ret
 
     @classmethod
-    def mse(cls, x, y):
+    def MSE(cls, x, y):
         cost_instance = cls(x, y)
-        cost_instance.__ror__ = lambda model: sum((cost_instance.y - model % cost_instance.x)**2)
-        cost_instance.__ror__.__name__ = "mse_cost_function"
+        cost_instance.fcn = lambda model: sum((cost_instance.y - model % cost_instance.x)**2)
         return cost_instance
 
     @classmethod
-    def nll(cls, x):
+    def unbinnedNLL(cls, x):
         cost_instance = cls(x)
-        cost_instance.__ror__ = lambda model: sum(-log(model % cost_instance.x))
-        cost_instance.__ror__.__name__ = "nll_cost_function"
+        cost_instance.fcn = lambda model: sum(-log(model % cost_instance.x))
         return cost_instance
+        
+    NLL = unbinnedNLL
 
     @classmethod
     def chi2(cls, data=None, bins=None, range=None, x=None, y=None):
@@ -53,12 +62,11 @@ class Cost:
         if np.any(cost_instance.y == 0):
             raise ValueError("Chi2 calculation requires that all observed counts (y) be non-zero.")
         
-        cost_instance.__ror__ = lambda model: Model(np.sum, [((cost_instance.y - model % cost_instance.x) ** 2) / cost_instance.y])
-        cost_instance.__ror__.__name__ = "chi2_cost_function"
+        cost_instance.fcn = lambda model: Model(np.sum, [((cost_instance.y - model % cost_instance.x) ** 2) / cost_instance.y])
         return cost_instance
 
     @classmethod
-    def binned_nll(cls, data=None, bins=None, range=None, x=None, y=None):
+    def binnedNLL(cls, data=None, bins=None, range=None, x=None, y=None):
         if data is not None and bins is not None:
             if x is not None or y is not None:
                 raise ValueError("Cannot provide both 'data' and 'x,y' for binned cost functions.")
@@ -69,8 +77,7 @@ class Cost:
         else:
             raise ValueError("For binned_nll, provide either 'data' and 'bins' (and optional 'range') or 'x' and 'y'.")
 
-        cost_instance.__ror__ = lambda model: 2 * sum(model % cost_instance.x - cost_instance.y * log(model % cost_instance.x))
-        cost_instance.__ror__.__name__ = "binned_nll_cost_function"
+        cost_instance.fcn = lambda model: 2 * sum(model % cost_instance.x - cost_instance.y * log(model % cost_instance.x))
         return cost_instance
 
 def bin(data, bins, range=None):
