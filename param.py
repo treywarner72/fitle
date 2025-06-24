@@ -108,12 +108,16 @@ class Param:
     # ------------------------------------------------------------------
     #   Comparison & hashing
     # ------------------------------------------------------------------
-    def equals(self, other: object) -> bool:  # noqa: D401
+
+    def __eq__(self, other: object) -> bool:  # noqa: D401
         if not isinstance(other, Param):
             return False
         if self.kind is self.input and other.kind is other.input:
             return True  # all INPUT placeholders are equivalent
         return self is other
+
+    def __hash__(self) -> int:  # noqa: D401 – identity hash
+        return id(self)
 
     # ------------------------------------------------------------------
     #   Printable helpers

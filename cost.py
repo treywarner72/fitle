@@ -59,7 +59,7 @@ class Cost:
         else:
             raise ValueError("For chi2, provide either 'data' and 'bins' (and optional 'range') or 'x' and 'y'.")
 
-        if np.any(cost_instance.y == 0):
+        if np.any(cost_instance.y() == 0):
             raise ValueError("Chi2 calculation requires that all observed counts (y) be non-zero.")
         
         cost_instance.fcn = lambda model: Model(np.sum, [((cost_instance.y - model % cost_instance.x) ** 2) / cost_instance.y])

@@ -311,7 +311,7 @@ _op_map = {
     '__pow__': named(lambda a, b: a ** b, 'pow'),
     '__rpow__': named(lambda a, b: b ** a, 'rpow'),
     '__neg__': named(lambda a: -a, 'neg'),
-    '__eq__': named(lambda a, b: a == b, 'eq'),
+    #DO NOT UNCOMMENT '__eq__': named(lambda a, b: a == b, 'eq'),
     '__ne__': named(lambda a, b: a != b, 'ne'),
     '__lt__': named(lambda a, b: a < b, 'lt'),
     '__le__': named(lambda a, b: a <= b, 'le'),

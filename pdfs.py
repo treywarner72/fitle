@@ -4,17 +4,17 @@ from .param import Param, P, Q, U
 
 SQRT2PI = np.sqrt(2 * np.pi)
 
-def gaussian(x=X, mu=None, sigma=None):
+def gaussian(mu=None, sigma=None):
     mu = mu if mu is not None else P("mu")
     sigma = sigma if sigma is not None else Q("sigma")
 
     norm = 1 / (sigma * 2.5066282746310002)
-    arg = -0.5 * ((x - mu) / sigma) ** 2
+    arg = -0.5 * ((X - mu) / sigma) ** 2
     return norm * Model(np.exp, [arg])
 
-def exponential(x=X, tau=None):
+def exponential(tau=None):
     tau = tau if tau is not None else Q('tau')
-    return (1 / tau) * np.e ** (-x / tau)
+    return (1 / tau) * np.e ** (-X / tau)
 
 def uniform(low=None, high=None):
     low = low if isinstance(low, Model) else P[-np.inf, 0, np.inf]('low') if low is None else const(low)

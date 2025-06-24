@@ -85,7 +85,7 @@ class Compiler:
             if model.kind == Param.theta:
                 def param_index(lst, target):
                     for i, item in enumerate(lst):
-                        if item.equals(target):
+                        if item == target:
                             return i
                     return -1
                 idx = param_index(self.root.params, model)
@@ -227,7 +227,7 @@ class Compiler:
     #  4.  Emit python source string
     # ------------------------------------------------------------------ #
 
-    def _init_for_shape(self, shape_obj, alias):
+    def _init_for_shape(self, obj, alias):
         """
         Return the source-code string for an accumulator initialiser
         corresponding to `shape_obj`, where
@@ -235,13 +235,15 @@ class Compiler:
            shape_obj is tuple       -> f"np.zeros({shape_obj})"
            otherwise (Model)        -> f"np.zeros_like({expr})"
         """
+        shape_obj = obj.shape()
         if shape_obj == ():
             return "0.0"
         if isinstance(shape_obj, tuple):
             return f"np.zeros({shape_obj})"
         # shape_obj is a Model (symbolic). Use its aliased expression
-        expr = self._alias_rhs(str(shape_obj), alias)
-        return f"np.zeros_like({expr})"
+        if shape_obj is X:
+            return f"np.zeros_like(x, dtype=np.float64)"
+        raise "Dont know the shape"
 
     # ------------------------------------------------------------------ #
     #  4.  Emit python source string
@@ -281,7 +283,7 @@ class Compiler:
                 if n.is_red:
                     acc, _ = n.is_red
                     # pick any rhs that gives the correct output shape
-                    shape_obj = n.model.shape()          # tuple, (), or Model
+                    shape_obj = n.model          # tuple, (), or Model
                     init      = self._init_for_shape(shape_obj, alias)
                     lines.append(f"    {acc} = {init}")
 
