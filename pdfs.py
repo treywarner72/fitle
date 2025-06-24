@@ -4,13 +4,32 @@ from .param import Param, P, Q, U
 
 SQRT2PI = np.sqrt(2 * np.pi)
 
-def gaussian(x=X, mu=None, sigma=None):
+def gaussian(x, mu=None, sigma=None):
+    """
+    Normalized Gaussian PDF:
+        f(x; mu, sigma) = 1 / (sigma * sqrt(2pi)) * exp(-0.5 * ((x - mu)/sigma)^2)
+
+    Parameters:
+        x      : input variable (symbol or array)
+        mu     : mean (symbol or float), default is symbolic P("mu")
+        sigma  : std deviation (symbol or float), must be > 0, default is Q("sigma")
+
+    Returns:
+        A Model representing the Gaussian PDF
+    """
+    from numpy import sqrt, pi, exp
+
     mu = mu if mu is not None else P("mu")
     sigma = sigma if sigma is not None else Q("sigma")
 
-    norm = 1 / (sigma * 2.5066282746310002)
+    # Placeholder for now : Implement a symbolic evaluation guard (This should raised if sigma <= 0 during evaluation time)
+    # This should be replaced with proper symbolic condition handling
+    if hasattr(sigma, "name") and sigma.name == "sigma":
+        raise RuntimeError("Symbolic guard for 'sigma > 0' is not yet implemented.")
+
+    norm = 1 / (sigma * sqrt(2 * pi))
     arg = -0.5 * ((x - mu) / sigma) ** 2
-    return norm * Model(np.exp, [arg])
+    return norm * Model(exp, [arg])
 
 def exponential(x=X, tau=None):
     tau = tau if tau is not None else Q('tau')
