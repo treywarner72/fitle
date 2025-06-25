@@ -220,4 +220,4 @@ def index(*args: int) -> Param:
     """Shortcut for creating an INDEX parameter with ``range(*args)``."""
     return Param(range=range(*args) if args else None, kind=Param.index)
 
-I: Param = index()
+I: Param = index() # default INDEX parameter.

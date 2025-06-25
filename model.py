@@ -8,6 +8,8 @@ import operator
 import functools
 
 class Model:
+    _compiled_cache = {} # Class-level cache for compiled functions
+    
     def __init__(self, fn, args):
         self.fn = fn
         self.args = args
@@ -68,10 +70,11 @@ class Model:
     def __hash__(self):
         def walk(m):
             if isinstance(m, Param):
-                if m.kind == Param.input:
-                    return ("INPUT")
-                else:
-                    return (m.kind, id(m))
+                #if m.kind == Param.input:
+                #    return ("INPUT")
+                #else:
+                #    return (m.kind, id(m))
+                return ("param", m.kind)
             elif isinstance(m, Reduction):
                 return ("reduce", walk(m.model), hash(m.index), m.op.__name__)
             elif isinstance(m, Model):
@@ -150,8 +153,6 @@ class Model:
         return _eval(self)
 
 
-
-
     def eval(self, x, index_map):
         if not self.params:
             theta = None
@@ -161,10 +162,9 @@ class Model:
         index_params = [p for p in self.free if p.kind == Param.index]
         index_list = [index_map[p] for p in index_params] if index_params else None
 
-        if hasattr(self, "_compiled"):
-            if self._hashed != hash(self):
-                self.compile()
-            return self._compiled(x, index_list, theta)
+        current_hash = hash(self) # Hash depends on symbolic structure
+        if current_hash in Model._compiled_cache:
+            return Model._compiled_cache[current_hash](x, index_list, theta)
         else:
             return self.eval_py(x, index_list)
 

@@ -328,12 +328,13 @@ class Compiler:
         self._hoisted_fns[name] = njit(fn)
         return name
 
-def _new_compile(self: Model):
-    c = Compiler(self)
-    self._compiled = c.compile()
-    self.code      = c.code
-    self._hashed   = hash(self)
+def new_compile(self):
+    current_hash = hash(self) # Hash depends on symbolic structure
+    if current_hash not in Model._compiled_cache:
+        print(f"Compiling model {self.__repr__()} (Hash: {current_hash})...")
+        c = Compiler(self)
+        Model._compiled_cache[current_hash] = c.compile()
+        self.code      = c.code
     return self
 
-# monkey-patch
-Model.compile = _new_compile
+Model.compile = new_compile
