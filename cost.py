@@ -1,5 +1,4 @@
 import numpy as np
-from .param import X
 from .model import Model, const
 from .mnp import log, sum
 

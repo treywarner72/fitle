@@ -3,7 +3,7 @@ import numpy as np
 from numba import njit
 from collections import defaultdict, deque
 from .model import Model, Reduction
-from .param import Param, X
+from .param import Param, INPUT
 
 # ---------------------------  Internal IR primitives  ---------------------------
 
@@ -90,7 +90,7 @@ class Compiler:
                     return -1
                 idx = param_index(self.root.params, model)
                 node = _IRNode(f"theta[{idx}]", frozenset())
-            elif model is X:
+            elif model is INPUT:
                 node = _IRNode("x", frozenset())
             elif model.kind == Param.index:
                 # Leaf that will be replaced by the loop variable.
@@ -241,7 +241,7 @@ class Compiler:
         if isinstance(shape_obj, tuple):
             return f"np.zeros({shape_obj})"
         # shape_obj is a Model (symbolic). Use its aliased expression
-        if shape_obj is X:
+        if shape_obj is INPUT:
             return f"np.zeros_like(x, dtype=np.float64)"
         raise "Dont know the shape"
 

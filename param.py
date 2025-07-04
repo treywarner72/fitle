@@ -35,11 +35,9 @@ __all__ = [
     "ParamKind",
     "Param",
     "ParamFactory",
-    "P",
-    "Q",
-    "U",
-    "X",
+    "INPUT",
     "index",
+    "INDEX"
 ]
 
 
@@ -75,6 +73,8 @@ class Param:
 
     def __init__(
         self,
+        arg0: float | str | None = None, 
+        arg1: float | None = None,
         min: float | None = None,
         start: float | None = None,
         max: float | None = None,
@@ -100,10 +100,54 @@ class Param:
             return
 
         # THETA – store optimisation metadata
-        self.min = min
-        self.start = start
-        self.max = max
+        self.min = min if min is not None else -np.inf
+        self.start = start if start is not None else 0
+        self.max = max if max is not None else np.inf
         self.value: float | None = self.start
+
+        if arg0 is not None:
+            if arg1 is not None:
+                self(arg0,arg1)
+            self(arg0)
+
+    def __init__(
+        self,
+        arg0: float | str | None = None, 
+        arg1: float | None = None,
+        min: float | None = None,
+        start: float | None = None,
+        max: float | None = None,
+        name: str | None = None,
+        *,
+        range: range | None = None,
+        kind: ParamKind = ParamKind.THETA,
+    ) -> None:
+        self.kind = kind
+        self.name = name
+
+        # INPUT – no metadata allowed
+        if kind is ParamKind.INPUT:
+            if any(x is not None for x in (min, start, max, name, range)):
+                raise ValueError("INPUT parameter must not carry bounds or name")
+            return
+
+        # INDEX – only a range
+        if kind is ParamKind.INDEX:
+            if any(x is not None for x in (min, start, max)):
+                raise ValueError("INDEX parameter cannot have numeric bounds")
+            self.range = range  # type: ignore[assignment]
+            return
+
+        # THETA – store optimisation metadata
+        self.min = min if min is not None else -np.inf
+        self.start = start if start is not None else 0
+        self.max = max if max is not None else np.inf
+        self.value: float | None = self.start
+
+        if arg0 is not None:
+            if arg1 is not None:
+                self(arg0,arg1)
+            self(arg0)
 
     # ------------------------------------------------------------------
     #   Comparison & hashing
@@ -149,41 +193,34 @@ class Param:
     # ------------------------------------------------------------------
     #   Mutating helpers
     # ------------------------------------------------------------------
-    def __call__(self, arg: str | int | float | np.number):
+    def __call__(self, arg0: str | np.number, arg1: np.number | None = None):
+        if arg1 is not None: 
+            self.min, self.max = arg0, arg1
+            reset = self.start is None or self.start < self.min or self.start > self.max
+            if reset:
+                if self.min == -np.inf and self.max == np.inf:
+                    self.start = 0.0
+                elif self.min == -np.inf:
+                    self.start = float(self.max)
+                elif self.max == np.inf:
+                    self.start = float(self.min)
+                else:
+                    self.start = 0.5 * (self.min + self.max)
+                self.value = self.start
+            return self
         """Rename (str) or set start value (numeric)."""
-        if isinstance(arg, str):
-            self.name = arg
-        elif isinstance(arg, (int, float, np.number)):
-            if self.min is not None and arg < self.min:
+        if isinstance(arg0, str):
+            self.name = arg0
+        elif isinstance(arg0, (int, float, np.number)):
+            if self.min is not None and arg0 < self.min:
                 raise ValueError("start below min bound")
-            if self.max is not None and arg > self.max:
+            if self.max is not None and arg0 > self.max:
                 raise ValueError("start above max bound")
-            self.start = float(arg)
-            self.value = float(arg)
+            self.start = float(arg0)
+            self.value = float(arg0)
         else:
             raise TypeError("Param.__call__ expects str or numeric")
         return self
-
-    def __getitem__(self, bounds: Tuple[float, float]):
-        """Assign numeric bounds via slice syntax and adjust ``start``.
-
-        A new default ``start`` is chosen if the existing one lies
-        outside the interval.
-        """
-        self.min, self.max = bounds
-        reset = self.start is None or self.start < self.min or self.start > self.max
-        if reset:
-            if self.min == -np.inf and self.max == np.inf:
-                self.start = 0.0
-            elif self.min == -np.inf:
-                self.start = float(self.max)
-            elif self.max == np.inf:
-                self.start = float(self.min)
-            else:
-                self.start = 0.5 * (self.min + self.max)
-            self.value = self.start
-        return self
-
 
 # -----------------------------------------------------------------------------
 #   Factory helpers
@@ -196,28 +233,27 @@ class ParamFactory:
         self._limits = default_limits
         self._start = default_start
 
-    def __getitem__(self, bounds: Tuple[float, float]):
-        """Return a new ``Param`` with bounds applied."""
-        return Param(self._start).__getitem__(bounds)
+    def __call__(self, arg0: str | np.number | None = None, arg1: np.number | None = None):
+        p = Param()(*self._limits)(self._start)
+        if arg0 is not None:
+            if arg1 is not None:
+                return p(arg0, arg1)
+            return p(arg0)
+        return p
 
-    def __call__(self, arg: str | int | float | np.number | None = None):
-        p = Param().__getitem__(self._limits)(self._start)
-        return p(arg) if arg is not None else p
 
-
-P = ParamFactory((-np.inf, np.inf), 0)      # unbounded
-Q = ParamFactory((1e-6, np.inf), 1)         # positive
-U = ParamFactory((0, 1), 0.5)               # 0–1 interval
+Param.positive = ParamFactory((1e-6, np.inf), 1)         # positive
+Param.unit = ParamFactory((0, 1), 0.5)               # 0–1 interval
 
 
 # -----------------------------------------------------------------------------
 #   Module‑level helpers
 # -----------------------------------------------------------------------------
 
-X: Param = Param(kind=Param.input)          # singleton INPUT placeholder
+INPUT: Param = Param(kind=Param.input)          # singleton INPUT placeholder
 
 def index(*args: int) -> Param:
     """Shortcut for creating an INDEX parameter with ``range(*args)``."""
     return Param(range=range(*args) if args else None, kind=Param.index)
 
-I: Param = index() # default INDEX parameter.
+INDEX: Param = index() # default INDEX parameter.

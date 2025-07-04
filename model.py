@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit, types
 from numba.typed import Dict
-from .param import Param, P, Q, U, X, I
+from .param import Param, INPUT, INDEX
 from collections.abc import Iterable
 from collections import defaultdict
 import operator
@@ -29,7 +29,7 @@ class Model:
                     walk(item)
             elif isinstance(m, (int, float, np.number)):
                 return
-            elif isinstance(m, Param) and  m.kind not in (Param.input, Param.index):
+            elif isinstance(m, Param) and m.kind not in (Param.input, Param.index):
                 if m not in seen:
                     seen.add(m)
                     flat.append(m)
@@ -143,7 +143,7 @@ class Model:
             if isinstance(m, Param):
                 if m.kind == Param.theta:
                     return m.value
-                if m is X:
+                if m.kind == Param.input:
                     return x
                 if m.kind == Param.index:
                     return index_map[m]
@@ -169,18 +169,18 @@ class Model:
             return self.eval_py(x, index_list)
 
     def __call__(self, x=None):
-        if X in self.free and x is None: raise Exception("Cannot __call__() with free X")
-        if X not in self.free and x is not None: raise Exception("Cannot __call__(x) without free X")
+        if INPUT in self.free and x is None: raise Exception("Cannot __call__() with free X")
+        if INPUT not in self.free and x is not None: raise Exception("Cannot __call__(x) without free X")
         if not self.free:
             return self.eval(None, {})
-        if self.free == [X]:
+        if self.free == [INPUT]:
             return self.eval(x, {})
         else:
-            return self % {X: x}
+            return self % x
 # ops
 
     def __getitem__(self, map):
-        if X in self.free:
+        if INPUT in self.free:
             if not isinstance(map, dict):
                 return self % {I: map}
             return self % map
@@ -191,7 +191,7 @@ class Model:
 
     def __mod__(self, subs):
         if not isinstance(subs, dict):
-            subs = {X : subs}
+            subs = {INPUT : subs}
         def walk(m):
             if isinstance(m, Model):
                 return m.copy_with_args([walk(a) for a in m.args])
@@ -208,11 +208,12 @@ class Model:
 #REPRESENTATION
 
     def __repr__(self):
-        fn_name = getattr(self.fn, '__name__', 'λ')
-        if fn_name == '<lambda>':
-            fn_name = 'λ'
-        arg_strs = [repr(arg) for arg in self.args]
-        return f"Model<{fn_name}>({', '.join(arg_strs)})"
+        #fn_name = getattr(self.fn, '__name__', 'λ')
+        #if fn_name == '<lambda>':
+        #    fn_name = 'λ'
+        #arg_strs = [repr(arg) for arg in self.args]
+        #return f"Model<{fn_name}>({', '.join(arg_strs)})"
+        return self._format()
 
     def __str__(self):
         return self._format()
@@ -374,7 +375,7 @@ def const(val):
     f.__name__ = f"const_{id(val)}"
     return Model(f, [])
 
-def indecise(obj, index = I):
+def indecise(obj, index = INDEX):
     if isinstance(obj, (list, tuple)):
         entries = [e if isinstance(e, (Model, Param)) else const(e) for e in obj]
         fn = lambda entries, i: entries[int(i)]
@@ -571,8 +572,8 @@ def shape(obj):
     if isinstance(obj, np.ndarray):
         return obj.shape
 
-    if obj is X:
-        return X                       # e.g. you called shape(X) directly
+    if obj is INPUT:
+        return INPUT                       # e.g. you called shape(X) directly
 
     if isinstance(obj, Param):
         return ()                      # θ_k etc. are scalars
@@ -588,8 +589,8 @@ def shape(obj):
             return ()
 
         # 1. if expression explicitly depends on free X → vector
-        if X in obj.free:
-            return X
+        if INPUT in obj.free:
+            return INPUT
 
         # 2. constant Model  (no args)  → try to evaluate once
         if not obj.args:
