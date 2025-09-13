@@ -1,3 +1,26 @@
+"""model.py
+=========
+Representation of models in the library, also the main user interface
+----------------------------------------------------------
+
+Define a model building on built in types or by using arithmetic with Params. For instance:
+
+linear_model = Param('a') * Param.INPUT + Param('b')
+gaussian_model = gaussian(Param('mu')(5,10)) # a gaussian model with a mu between 5 and 10 and a default sigma 
+
+We can also add models together:
+
+composite_model = Param('n_gaussian') * gaussian_model + linear_model
+
+To run a model, all you need to do is run __call__:
+
+composite_model(0) or composite_model(ndarray)
+
+You can also compile it with composite_model.compile(), after which any model with the same shape of operations will use a numba-compiled version
+
+
+"""
+
 import numpy as np
 from numba import njit, types
 from numba.typed import Dict
@@ -6,8 +29,25 @@ from collections.abc import Iterable
 from collections import defaultdict
 import operator
 import functools
+from typing import Any, Optional, Tuple
+
+__all__ = [
+    "Model",
+]
 
 class Model:
+    """Represents a function that returns an output from INPUT, THETA parameters, and sometimes INDEX's.
+
+    Parameters
+    ----------
+    fn : function
+        A function that takes in input scalars and returns an output
+    args : list
+        A list of parameters that correspond to the scalars of the input of fn.
+    memory : dictionary
+        Acted on by other classes, for now just so that a cost function knows what its based on.
+
+    """
     _compiled_cache = {} # Class-level cache for compiled functions
     
     def __init__(self, fn, args):
@@ -17,6 +57,8 @@ class Model:
 
     @property
     def params(self):
+        """A list of all the THETA params that act on the model.
+        """
         flat = []
         seen = set()
 
@@ -39,6 +81,8 @@ class Model:
 
     @property
     def free(self):
+        """A list of all the free params, which are INPUT and INDEX that act on the model.
+        """
         flat = []
         seen = set()
 
@@ -68,12 +112,10 @@ class Model:
 
 
     def __hash__(self):
+        """Two equal-hashed models may have different parameters, but if you use the same scalars for those parameters, they will give the same output.
+        """
         def walk(m):
             if isinstance(m, Param):
-                #if m.kind == Param.input:
-                #    return ("INPUT")
-                #else:
-                #    return (m.kind, id(m))
                 return ("param", m.kind)
             elif isinstance(m, Reduction):
                 return ("reduce", walk(m.model), hash(m.index), m.op.__name__)
@@ -152,8 +194,7 @@ class Model:
 
         return _eval(self)
 
-
-    def eval(self, x, index_map):
+    def eval(self, x, index_map, numba=False):
         if not self.params:
             theta = None
         else:
@@ -166,6 +207,8 @@ class Model:
         if current_hash in Model._compiled_cache:
             return Model._compiled_cache[current_hash](x, index_list, theta)
         else:
+            if numba:
+                raise AttributeError("No compiled function in cache")
             return self.eval_py(x, index_list)
 
     def __call__(self, x=None):

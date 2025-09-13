@@ -1,6 +1,6 @@
 """param.py
 =========
-Symbolic parameter primitives used throughout the library
+Symbolic parameters used throughout the library
 ----------------------------------------------------------
 
 Three mutually–exclusive roles exist:
@@ -9,21 +9,24 @@ THETA
     A free model parameter to be optimised.  Optionally carries
     ``min`` / ``max`` bounds and a starting value ``start``.
 INPUT
-    Placeholder for the data abscissa X.  There is exactly one;
-    it never has bounds.
+    Represents the input, when a parameter is plugged into a model. 
+    Often repaced with data for cost functions.
 INDEX
     Integer loop control used by ``Reduction`` objects.  Holds a
     Python :class:`range` instead of numeric bounds.
 
 Factory helpers create the most common bounded flavours::
 
-    mu    = P()         # unbounded, start 0
-    sigma = Q()         # >0, start 1
-    w     = U()         # 0–1, start 0.5
+    mu     = Param()              # unbounded, start 0
+    sigma  = Param.positive()     # >0, start 1
+    weight = Param.unit()         # 0–1, start 0.5
 
 Further tweaks are chainable in any order, e.g.::
 
-    P('sigma')(2.0)[0.1, 10]    # name, start, bounds in one line
+    P('sigma')(2.0)(0.1, 10)    # name, start, bounds in one line
+
+So, using __call__, a string sets the name, a scalar the starting value, and two scalars for the bounds
+
 """
 from __future__ import annotations
 
@@ -50,7 +53,7 @@ class ParamKind(Enum):
 
 
 class Param:
-    """Light‑weight symbolic leaf node used in :class:`Model` graphs.
+    """Different kinds of parameters used in :class:`Model`s.
 
     Parameters
     ----------
@@ -82,7 +85,7 @@ class Param:
         *,
         range: range | None = None,
         kind: ParamKind = ParamKind.THETA,
-    ) -> None:
+    ):
         self.kind = kind
         self.name = name
 
