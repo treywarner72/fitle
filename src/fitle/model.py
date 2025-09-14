@@ -33,6 +33,7 @@ from typing import Any, Optional, Tuple
 
 __all__ = [
     "Model",
+    "indecise"
 ]
 
 class Model:
