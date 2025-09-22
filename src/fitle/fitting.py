@@ -39,11 +39,14 @@ def fit(model, numba=True, grad=True, ncall = 9999999, options={}):
     if not isinstance(model, Model) or not callable(model):
         raise TypeError("expected a Model instance")
 
-    model.compile() if numba == True else model.compile_py()
-    params = model.params
+     
+    if numba == True:
+        model.compile()
+        if grad:
+            grad_model = model.grad().compile()
 
-    if grad:
-        grad_model = model.grad().compile()
+
+    params = model.params
 
     def loss_fn(*theta):
         for p, v in zip(params, theta):

@@ -104,53 +104,17 @@ class Param:
 
         # THETA – store optimisation metadata
         self.min = min if min is not None else -np.inf
-        self.start = start if start is not None else 0
         self.max = max if max is not None else np.inf
         self.value: float | None = self.start
 
         if arg0 is not None:
             if arg1 is not None:
                 self(arg0,arg1)
-            self(arg0)
+            else:
+                self(arg0)
 
-    def __init__(
-        self,
-        arg0: float | str | None = None, 
-        arg1: float | None = None,
-        min: float | None = None,
-        start: float | None = None,
-        max: float | None = None,
-        name: str | None = None,
-        *,
-        range: range | None = None,
-        kind: ParamKind = ParamKind.THETA,
-    ) -> None:
-        self.kind = kind
-        self.name = name
-
-        # INPUT – no metadata allowed
-        if kind is ParamKind.INPUT:
-            if any(x is not None for x in (min, start, max, name, range)):
-                raise ValueError("INPUT parameter must not carry bounds or name")
-            return
-
-        # INDEX – only a range
-        if kind is ParamKind.INDEX:
-            if any(x is not None for x in (min, start, max)):
-                raise ValueError("INDEX parameter cannot have numeric bounds")
-            self.range = range  # type: ignore[assignment]
-            return
-
-        # THETA – store optimisation metadata
-        self.min = min if min is not None else -np.inf
-        self.start = start if start is not None else 0
-        self.max = max if max is not None else np.inf
-        self.value: float | None = self.start
-
-        if arg0 is not None:
-            if arg1 is not None:
-                self(arg0,arg1)
-            self(arg0)
+        if self.start is None:
+            self.start = start if start is not None else 0
 
     # ------------------------------------------------------------------
     #   Comparison & hashing
