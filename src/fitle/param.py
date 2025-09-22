@@ -105,7 +105,6 @@ class Param:
         # THETA – store optimisation metadata
         self.min = min if min is not None else -np.inf
         self.max = max if max is not None else np.inf
-        self.value: float | None = self.start
 
         if arg0 is not None:
             if arg1 is not None:
@@ -115,6 +114,8 @@ class Param:
 
         if self.start is None:
             self.start = start if start is not None else 0
+            
+        self.value: float | None = self.start
 
     # ------------------------------------------------------------------
     #   Comparison & hashing
