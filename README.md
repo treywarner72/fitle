@@ -10,20 +10,6 @@ A tiny, fast library for building statistical models, compiling them to efficien
 
 ---
 
-## Features
-
-- **Concise language for models**: specify a model as if you were writing it by hand
-- **Three kind of parameters**:
-  - `Param()` or `THETA` (fit parameter with bounds/start),
-  - `INPUT` (independent variable placeholder),
-  - `index(...)` or `INDEX` (miscellaneous integer free parameter for loops, reductions, and more).
-- **Compilation**: model graphs are hashed and compiled once, reused via a cache.
-- **Gradients**: `Model.grad()` builds an analytic model of ∂f/∂θ (where supported).
-- **Out-of-the-box costs**: `Cost.MSE`, `Cost.NLL` (unbinned), `Cost.chi2`, `Cost.binnedNLL`.
-- **Fitting**: one call, returns a friendly `FitResult`.
-
----
-
 ## Install
 
 This is currently a local/package source library.
@@ -166,17 +152,41 @@ print(res.errors)  # dict: {param_name: error}
 
 ---
 
+## Speed
+
+There is no need to define all the steps. Here is an example:
+
+```py
+#define model
+model = Param.postiive('n_signal') * gaussian() + Param.positive('n_background') * (Param('a')*INPUT + Param(B))
+
+# fit the model with respect to the data
+res = fit(model | Cost.NLL(data))
+
+plt.hist(data)
+plt.plot(x, model(x))
+plt.text(f"signal count: {res.values['n_signal']}")
+
+# or
+n_signal = Param.postiive('n_signal')
+model = n_signal * ...
+fit(model | Cost.NLL(data))
+...
+plt.text(f"signal count: {n_signal.value}")
+```
+---
+
 ## Reductions & indexing
 
-Reductions let you sum (or, internally, “add-reduce”) over an integer `index` to form histogram-like constructs or convolutions.
+Reductions let you do operations over an integer `index`.
 
 - Create an index: `i = index(N)` (→ `range(0, N)`).
 - Build a per-bin expression that depends on `i`.
-- Wrap with `Reduction(expr, i)`. The compiler lowers this into a counted loop and an accumulator.
+- Wrap with `Reduction(expr, i, operation=operator.add)
 
 Helper: **`indecise(container, index)`** – represents the picking an element at integer `index` from a Python list/tuple or a NumPy array, as a `Model`.
 
-### Mini example: discrete convolution of MC histogram with a Gaussian
+### Example: discrete convolution of MC histogram with a Gaussian
 
 ```py
 
