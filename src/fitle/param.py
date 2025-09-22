@@ -105,6 +105,8 @@ class Param:
         # THETA – store optimisation metadata
         self.min = min if min is not None else -np.inf
         self.max = max if max is not None else np.inf
+        self.start = None
+        self.value = None
 
         if arg0 is not None:
             if arg1 is not None:
