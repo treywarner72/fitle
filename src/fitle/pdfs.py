@@ -30,7 +30,7 @@ def crystalball(alpha, n, xbar, sigma):
     mask = (x - xbar)/sigma > -alpha
 
     return where((x - xbar)/sigma > -alpha, 
-              N*pexp(-0.5*((x-xbar)/sigma)**2),
+              N*exp(-0.5*((x-xbar)/sigma)**2),
               N*A*(B - (x-xbar)/sigma)**-n
              )
 
