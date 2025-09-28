@@ -24,6 +24,7 @@ You can also compile it with composite_model.compile(), after which any model wi
 import numpy as np
 from numba import njit, types
 from numba.typed import Dict
+import typing
 from .param import Param, INPUT, INDEX
 from collections.abc import Iterable
 from collections import defaultdict
@@ -50,6 +51,11 @@ class Model:
 
     """
     _compiled_cache = {} # Class-level cache for compiled functions
+
+    @property
+    def compiled(self) -> bool:
+        """Return True if this Model has a compiled numba function in the cache."""
+        return hash(self) in Model._compiled_cache
     
     def __init__(self, fn, args):
         self.fn = fn
@@ -110,18 +116,36 @@ class Model:
         walk(self)
         return flat
 
-
-
     def __hash__(self):
         """Two equal-hashed models may have different parameters, but if you use the same scalars for those parameters, they will give the same output.
         """
+
         def walk(m):
             if isinstance(m, Param):
                 return ("param", m.kind)
             elif isinstance(m, Reduction):
                 return ("reduce", walk(m.model), hash(m.index), m.op.__name__)
             elif isinstance(m, Model):
-                fn_id = getattr(m.fn, "__name__", repr(m.fn))
+                fn = m.fn
+
+                # --- special case: zero-arg const() ---
+                if not m.args and getattr(fn, "__name__", "") == "const":
+                    val = fn()
+                    if isinstance(val, np.ndarray):
+                        return ("const_array", val.shape, val.dtype.str, tuple(val.flatten().tolist()))
+                    else:
+                        return ("const_scalar", val)
+
+                # --- otherwise: normal Model node ---
+                def _fn_key(f):
+                    # Prefer module + qualname for stable identity
+                    if hasattr(f, "__qualname__"):
+                        return (f.__module__, f.__qualname__)
+                    if hasattr(f, "__name__"):
+                        return (f.__module__, f.__name__)
+                    return repr(f)
+
+                return ("model", _fn_key(fn), tuple(walk(arg) for arg in m.args))
                 return (fn_id, tuple(walk(arg) for arg in m.args))
             elif isinstance(m, np.ndarray):
                 return ("ndarray", m.shape, m.dtype.str, tuple(m.flatten().tolist()))
@@ -210,7 +234,7 @@ class Model:
         else:
             if numba:
                 raise AttributeError("No compiled function in cache")
-            return self.eval_py(x, index_list)
+            return self.eval_py(x, index_map)
 
     def __call__(self, x=None):
         if INPUT in self.free and x is None: raise Exception("Cannot __call__() with free X")
@@ -226,9 +250,11 @@ class Model:
     def __getitem__(self, map):
         if INPUT in self.free:
             if not isinstance(map, dict):
-                return self % {I: map}
+                return self % {INDEX: map}
             return self % map
-        return self.eval(None, map)
+        if not isinstance(map, dict):
+                return self.eval(None, {INDEX: map})
+        self.eval(None, map)
 
     def copy_with_args(self, args):
         return type(self)(self.fn, args)
@@ -300,6 +326,17 @@ class Model:
                 return True
             return False
 
+        def get_prec(m):
+            """Return precedence for formatting a Model node."""
+            if isinstance(m, Model):
+                fn_name = getattr(m.fn, "__name__", "")
+                if fn_name == "const":
+                    return 100   # const literals are atomic
+                if fn_name not in op_info:
+                    return 100   # function calls (sum, exp, log, etc.) are atomic
+                return op_info[fn_name][1]
+            return 100  # numbers, arrays, etc. are atomic
+
         if fn_name in op_info and len(self.args) == 2:
             op, prec, assoc = op_info[fn_name]
             if fn_name.startswith('r'):
@@ -317,12 +354,10 @@ class Model:
                 rstr = str(right)
 
             if isinstance(left, Model):
-                l_op, l_prec, _ = op_info.get(getattr(left.fn, '__name__', ''), ('', 0, ''))
-                if parens_needed(prec, assoc, l_prec, True):
+                if parens_needed(prec, assoc, get_prec(left), True):
                     lstr = f'({lstr})'
             if isinstance(right, Model):
-                r_op, r_prec, _ = op_info.get(getattr(right.fn, '__name__', ''), ('', 0, ''))
-                if parens_needed(prec, assoc, r_prec, False):
+                if parens_needed(prec, assoc, get_prec(right), False):
                     rstr = f'({rstr})'
 
             return f"{lstr} {op} {rstr}"
@@ -331,6 +366,22 @@ class Model:
             arg = self.args[0]
             astr = arg._format(4) if isinstance(arg, Model) else str(arg)
             return f"-{astr}"
+
+        elif fn_name == 'const' and len(self.args) == 0:
+            try:
+                val = self.fn()
+            except Exception:
+                return "const(?)"
+            if isinstance(val, np.ndarray):
+                # shorten big arrays but show dtype/shape
+                if val.size <= 6:
+                    return f"{val}"
+                else:
+                    return f"const(array, shape={val.shape}, dtype={val.dtype})"
+            else:
+                return f"{val!r}"
+
+        # generic case
 
         arg_strs = [arg._format() if isinstance(arg, Model) else str(arg) for arg in self.args]
         return f"{fn_name}({', '.join(arg_strs)})"
@@ -369,6 +420,8 @@ def bind_ops(cls):
         def op_method(self, other=None, fn=fn):
             if other is None:
                 return Model(fn, [self])
+            if not isinstance(other, typing.Hashable):
+                other = const(other)
             return Model(fn, [self, other]) if 'r' not in name else Model(fn, [other, self])
         setattr(cls, name, op_method)
 
@@ -416,7 +469,7 @@ def identity(x): return x
 
 def const(val):
     f = lambda val=val: val
-    f.__name__ = f"const_{id(val)}"
+    f.__name__ = f"const"
     return Model(f, [])
 
 def indecise(obj, index = INDEX):

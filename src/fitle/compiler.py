@@ -331,7 +331,7 @@ class Compiler:
 def new_compile(self):
     current_hash = hash(self) # Hash depends on symbolic structure
     if current_hash not in Model._compiled_cache:
-        print(f"Compiling model {self.__repr__()} (Hash: {current_hash})...")
+        print(f"Compiling model...")
         c = Compiler(self)
         Model._compiled_cache[current_hash] = c.compile()
         self.code      = c.code

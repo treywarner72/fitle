@@ -143,6 +143,8 @@ class Param:
         if self.kind is self.input:
             return "INPUT"
         if self.kind is self.index:
+            if self.range == None:
+                return "INDEX"
             return f"{self._prefix()}{self.range}"
         if self.min == self.max:
             return f"{self._prefix()}Param(value={self.value})"
@@ -155,6 +157,8 @@ class Param:
         if self.kind is self.input:
             return "INPUT"
         if self.kind is self.index:
+            if self.range == None:
+                return "INDEX"
             return f"{self._prefix()}{self.range}"
         if hasattr(self, "error"):
             return f"{self._prefix()}{self.value:.4g} ± {self.error:.2g}"
