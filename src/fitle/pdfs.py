@@ -20,17 +20,17 @@ def exponential(tau=None):
 def crystalball(alpha, n, xbar, sigma):
     x = INPUT
     n_over_alpha = n/alpha
-    exp = exp(-0.5*alpha ** 2)
-    A = (n_over_alpha)**n*exp
+    pexp = exp(-0.5*alpha ** 2)
+    A = (n_over_alpha)**n*pexp
     B =  n_over_alpha - alpha
-    C = n_over_alpha/(n-1)*exp
+    C = n_over_alpha/(n-1)*pexp
     D = np.sqrt(0.5*np.pi)*(1 + Model(lambda a: scipy.special.erf(a), [alpha/np.sqrt(2)]))
     N = 1/(sigma*(C + D))
 
     mask = (x - xbar)/sigma > -alpha
 
     return where((x - xbar)/sigma > -alpha, 
-              N*exp(-0.5*((x-xbar)/sigma)**2),
+              N*pexp(-0.5*((x-xbar)/sigma)**2),
               N*A*(B - (x-xbar)/sigma)**-n
              )
 
