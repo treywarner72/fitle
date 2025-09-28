@@ -2,6 +2,7 @@ import numpy as np
 from .model import Model, INPUT, const, indecise, Reduction
 from .param import Param, index
 from .mnp import exp, where, sum
+import scipy
 
 SQRT2PI = np.sqrt(2 * np.pi)
 
