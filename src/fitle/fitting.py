@@ -35,7 +35,7 @@ class FitResult:
             ret += f"{name}: {p.value:.4g} ± {p.error:.2g}\n"
         return ret
 
-def fit(model, numba=True, grad=True, ncall = 9999999, options={}):
+def fit(model, numba=False, grad=False, ncall = 9999999, options={}):
     if not isinstance(model, Model) or not callable(model):
         raise TypeError("expected a Model instance")
 

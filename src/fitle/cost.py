@@ -1,6 +1,6 @@
 import numpy as np
 from .model import Model, const
-from .mnp import log, sum
+from .mnp import log, sum, where
 
 class Cost:
     """
@@ -47,7 +47,7 @@ class Cost:
     NLL = unbinnedNLL
 
     @classmethod
-    def chi2(cls, data=None, bins=None, range=None, x=None, y=None):
+    def chi2(cls, data=None, bins=None, range=None, x=None, y=None, zero_method='error'):
         if data is not None and bins is not None:
             if x is not None or y is not None:
                 raise ValueError("Cannot provide both 'data' and 'x,y' for binned cost functions.")
@@ -59,6 +59,11 @@ class Cost:
             raise ValueError("For chi2, provide either 'data' and 'bins' (and optional 'range') or 'x' and 'y'.")
 
         if np.any(cost_instance.y() == 0):
+            if zero_method == 'absolute':
+                condition = cost_instance.y > 0
+                y_star = where(cost_instance.y>0, cost_instance.y, 1)
+                cost_instance.fcn = lambda model: sum((cost_instance.y - model % cost_instance.x) ** 2 / y_star)
+                return cost_instance
             raise ValueError("Chi2 calculation requires that all observed counts (y) be non-zero.")
         
         cost_instance.fcn = lambda model: Model(np.sum, [((cost_instance.y - model % cost_instance.x) ** 2) / cost_instance.y])
