@@ -579,9 +579,13 @@ def _grad_fn(model, wrt):
 
     if fn == 'sum':
         return Model(np.sum, [_grad_fn(args[0], wrt)])
-
-
-    # fallback: assume zero
+    
+    if fn == 'where':
+        cond, x, y = args
+        # Differentiate only the "branches"
+        dx = _grad_fn(x, wrt)
+        dy = _grad_fn(y, wrt)
+        return Model(np.where, [cond, dx, dy])
     raise Exception(f"Cannot differentiate {fn}")
 
 def _grad(self, wrt=None):
@@ -590,7 +594,10 @@ def _grad(self, wrt=None):
     if isinstance(wrt, Param):
         return _grad_fn(self, wrt).simplify()
     if isinstance(wrt, (list, tuple)):
-        return Model(lambda *args: np.array(args), [_grad_fn(self, p).simplify() for p in wrt])
+        def stack_fn(*args):
+            return np.array(args)
+        stack_fn.__name__ = "vector"
+        return Model(stack_fn, [_grad_fn(self, p).simplify() for p in wrt])
     raise TypeError(f"grad expects Param, list of Param, or None, got {type(wrt)}")
 
 

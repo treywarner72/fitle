@@ -35,15 +35,28 @@ class FitResult:
             ret += f"{name}: {p.value:.4g} ± {p.error:.2g}\n"
         return ret
 
-def fit(model, numba=False, grad=False, ncall = 9999999, options={}):
+def fit(model, numba=True, grad=True, ncall = 9999999, options={}):
     if not isinstance(model, Model) or not callable(model):
         raise TypeError("expected a Model instance")
 
-     
-    if numba == True:
-        model.compile()
-        if grad:
-            grad_model = model.grad().compile()
+    # Try gradient construction
+    grad_model = None
+    if grad:
+        try:
+            grad_model = model.grad()
+        except Exception as e:
+            print(f"[fit] Warning: gradient disabled ({e})")
+            grad = False
+
+    # Try compilation
+    if numba:
+        try:
+            model.compile()
+            if grad and grad_model is not None:
+                grad_model.compile()
+        except Exception as e:
+            print(f"[fit] Warning: numba compile disabled ({e})")
+            numba = False
 
 
     params = model.params
