@@ -16,8 +16,8 @@ class Cost:
                              (observed counts/values). `None` for some NLL cases.
     """
     def __init__(self, x_data, y_data=None):
-        self.x = x_data
-        self.y = y_data if y_data is not None else None
+        self.x = const(x_data)
+        self.y = const(y_data) if y_data is not None else None
         self.fcn = self._base_fcn # Assign the method to the attribute
 
     def _base_fcn(self, *args):
@@ -59,7 +59,7 @@ class Cost:
         else:
             raise ValueError("For chi2, provide either 'data' and 'bins' (and optional 'range') or 'x' and 'y'.")
 
-        if np.any(cost_instance.y == 0):
+        if np.any(cost_instance.y() == 0):
             if zero_method == 'absolute':
                 condition = cost_instance.y > 0
                 y_star = where(cost_instance.y>0, cost_instance.y, 1)
