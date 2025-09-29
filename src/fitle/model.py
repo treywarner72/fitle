@@ -142,7 +142,9 @@ class Model:
                     if hasattr(f, "__qualname__"):
                         return (f.__module__, f.__qualname__)
                     if hasattr(f, "__name__"):
-                        return (f.__module__, f.__name__)
+                        if hasattr(f, "__module__"):
+                            return (f.__module__, f.__name__)
+                        return (f.__name__)
                     return repr(f)
 
                 return ("model", _fn_key(fn), tuple(walk(arg) for arg in m.args))
