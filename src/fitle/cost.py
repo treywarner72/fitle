@@ -59,7 +59,7 @@ class Cost:
         else:
             raise ValueError("For chi2, provide either 'data' and 'bins' (and optional 'range') or 'x' and 'y'.")
 
-        if np.any(cost_instance.y() == 0):
+        if np.any(cost_instance.y == 0):
             if zero_method == 'absolute':
                 condition = cost_instance.y > 0
                 y_star = where(cost_instance.y>0, cost_instance.y, 1)
