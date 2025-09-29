@@ -16,8 +16,8 @@ class Cost:
                              (observed counts/values). `None` for some NLL cases.
     """
     def __init__(self, x_data, y_data=None):
-        self.x = const(x_data)
-        self.y = const(y_data) if y_data is not None else None
+        self.x = x_data
+        self.y = y_data if y_data is not None else None
         self.fcn = self._base_fcn # Assign the method to the attribute
 
     def _base_fcn(self, *args):
@@ -30,6 +30,7 @@ class Cost:
     def __ror__(self, model):
         ret = self.fcn(model)
         ret.memory['base'] = model
+        ret.memory['cost'] = self
         return ret
 
     @classmethod

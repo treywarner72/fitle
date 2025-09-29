@@ -2,6 +2,7 @@ import numpy as np
 import iminuit
 from .model import Model
 from .param import Param
+import matplotlib.pyplot as plt
 
 
 class FitResult:
@@ -9,6 +10,7 @@ class FitResult:
         self.minimizer = m
         self.model = model
         self.predict = model.memory['base'].freeze() if "base" in model.memory else "No memory"
+        self.cost = model.memory['cost'] if "cost" in model.memory else "No memory"
         self.fval = m.fval
         self.success = m.valid
         self._populate_params()
@@ -34,6 +36,15 @@ class FitResult:
             name = p.name if p.name else f"x{i}"; i+=1
             ret += f"{name}: {p.value:.4g} ± {p.error:.2g}\n"
         return ret
+    
+    def plot_data(self):
+        plt.errorbar(self.cost.x, self.cost.y, linestyle='', marker='.', color='black', yerr=np.sqrt(self.cost.y))
+        
+    def plot_fit(self):
+        plt.plot(self.cost.x, self.predict(x))
+    
+    def dof(self):
+        return len(self.cost.x) - len(self.values) - 1
 
 def fit(model, numba=True, grad=True, ncall = 9999999, options={}):
     if not isinstance(model, Model) or not callable(model):

@@ -473,15 +473,20 @@ def const(val):
     return Model(f, [])
 
 def indecise(obj, index = INDEX):
-    if isinstance(obj, (list, tuple)):
-        entries = [e if isinstance(e, (Model, Param)) else const(e) for e in obj]
-        fn = lambda entries, i: entries[int(i)]
-        fn.__name__ = 'indecise'
-        return Model(fn, [entries, index])
-    else:
-        fn = lambda arr, i: arr[int(i)]
-        fn.__name__ = 'indecise'
-        return Model(fn, [obj, index])
+    #if isinstance(obj, (list, tuple)):
+    #    entries = [e if isinstance(e, (Model, Param)) else const(e) for e in obj]
+    #    fn = lambda entries, i: entries[int(i)]
+    #    fn.__name__ = 'indecise'
+    #    return Model(fn, [entries, index])
+    #else:
+    #    fn = lambda arr, i: arr[int(i)]
+    #    fn.__name__ = 'indecise'
+    #    return Model(fn, [obj, index])
+    if not isinstance(obj, typing.Hashable):
+        obj = const(obj)
+    fn = lambda arr, i: arr[int(i)]
+    fn.__name__ = 'indecise'
+    return Model(fn, [obj, index])
 
 
 
