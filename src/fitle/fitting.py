@@ -47,7 +47,7 @@ class FitResult:
         plt.plot(self.cost.x(), self.predict(self.cost.x()))
     
     def dof(self):
-        return len(self.cost.x) - len(self.values) - 1
+        return len(self.cost.x()) - len(self.values) - 1
 
 def fit(model, numba=True, grad=True, ncall = 9999999, options={}):
     if not isinstance(model, Model) or not callable(model):
