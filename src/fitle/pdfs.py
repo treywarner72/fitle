@@ -36,8 +36,8 @@ def crystalball(alpha, n, xbar, sigma):
              )
 
 
-def convolve(d_x, c, mass_mother, mu, sigma):
-    i = index(len(c))
+def convolve(d_x, c, mass_mother, mu, sigma, index=None):
+    i = index(len(c)) if not index else index
     w = indecise(const(c), i)
     centers = indecise(const(d_x), i)
     shifted_x = INPUT + mass_mother - mu
