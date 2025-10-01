@@ -41,7 +41,7 @@ class FitResult:
         return ret
     
     def plot_data(self):
-        plt.errorbar(self.cost.x(), self.cost.y(), linestyle='', marker='.', color='black', yerr=np.sqrt(self.cost.y))
+        plt.errorbar(self.cost.x(), self.cost.y(), linestyle='', marker='.', color='black', yerr=np.sqrt(self.cost.y()))
         
     def plot_fit(self):
         plt.plot(self.cost.x(), self.predict(self.cost.x()))
