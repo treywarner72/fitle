@@ -1,23 +1,18 @@
 # fitle
 
-A tiny, fast library for building statistical models, compiling them to efficient [Numba] code, and fitting to data with [iminuit].
-
-> Core ideas:
-> - Compose models from simple pieces (`Param`, arithmetic, `numpy` ops).
-> - Contextualize it to data with built-in cost factories (MSE, (un)binned NLL, χ²).
-> - Generate optimized numba code.
+A fast library for building statistical models, compiling them to efficient [Numba] code, and fitting to data with [iminuit].
+> - Compose models from pieces (`Param`, arithmetic, `numpy` ops).
+> - Tie it to data with cost functions (MSE, (un)binned NLL, χ²).
 > - Fit with `iminuit`.
 
 ---
 
 ## Install
 
-This is currently a local/package source library.
-
 ```bash
-# From the repository root (where setup.py/pyproject would live if you add one)
-# Editable install (recommended while developing)
 pip install -e .
+# or
+pip3 install git+https://github.com/treywarner72/fitle.git
 ```
 
 ### Dependencies
@@ -26,11 +21,10 @@ pip install -e .
 - `numpy`
 - `numba`
 - `iminuit`
-- (optional) `matplotlib` for plotting in the examples
 
 ---
 
-## Quick start
+## Basic example
 
 
 ```py
@@ -306,8 +300,7 @@ class FitResult:
   - `{INPUT: x_array}` feeds data,
   - `x_array` is shorthand for above,
   - `{param_obj: value_or_model}` replaces parameters or subgraphs.
-- If you pass arrays into `const`, they are hoisted, which is necessary sometimes (I need to fix this).
-- χ² requires **non-zero** counts; zeros will raise `ValueError`.
+- χ² requires non-zero counts unless you set the zero_mode to "absolute", to ignore those bins with no counts.
 
 ---
 
@@ -319,8 +312,7 @@ MIT
 
 ## Acknowledgements
 
-- Uses [NumPy] and [Numba] for speed; [iminuit] for minimization.
-- Inspired by common HEP fitting workflows.
+- Uses [NumPy], [Numba], and [iminuit].
 
 [NumPy]: https://numpy.org/
 [Numba]: https://numba.pydata.org/
