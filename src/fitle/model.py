@@ -74,6 +74,8 @@ class Model:
                 self._root = root
                 self.max_chars = max_chars
 
+            # ----- tree navigation -----
+
             def __getitem__(self, idx):
                 node = self._root
                 if not isinstance(idx, tuple):
@@ -88,16 +90,17 @@ class Model:
             def __len__(self):
                 return len(self._root.args)
 
+            # ----- helpers -----
+
             def _short(self, node):
                 s = str(node).replace("\n", " ")
                 if len(s) <= self.max_chars:
                     return s
                 return s[: self.max_chars - 1] + "…"
 
-            def __repr__(self):
-                import numpy as np
-                from collections.abc import Iterable
+            # ----- text repr (terminal / logs) -----
 
+            def __repr__(self):
                 lines = []
 
                 def walk(node, path=(), depth=0):
@@ -116,6 +119,52 @@ class Model:
 
                 walk(self._root)
                 return "<components>\n" + "\n".join(lines) + "\n</components>"
+
+            # ----- HTML repr (Jupyter) -----
+
+            def _repr_html_(self):
+                def esc(s: str) -> str:
+                    return (
+                        s.replace("&", "&amp;")
+                        .replace("<", "&lt;")
+                        .replace(">", "&gt;")
+                    )
+
+                def render(node, path=()):
+                    idx = "[" + ",".join(map(str, path)) + "]" if path else "[]"
+                    label = esc(f"{idx} {self._short(node)}")
+
+                    # children?
+                    children = []
+                    if isinstance(node, Model):
+                        children = list(node.args)
+                    elif isinstance(node, Iterable) and not isinstance(
+                        node, (str, bytes, np.ndarray)
+                    ):
+                        children = list(node)
+
+                    if not children:
+                        # leaf
+                        return f"<div style='margin-left:1em;font-family:monospace'>{label}</div>"
+
+                    # internal node with collapsible details
+                    inner = "".join(
+                        render(child, path + (i,)) for i, child in enumerate(children)
+                    )
+                    return (
+                        "<details style='margin-left:0.5em'>"
+                        f"<summary style='font-family:monospace'>{label}</summary>"
+                        f"{inner}"
+                        "</details>"
+                    )
+
+                body = render(self._root, ())
+                return (
+                    "<div class='components-tree' "
+                    "style='font-family:monospace; font-size: 12px'>"
+                    f"{body}"
+                    "</div>"
+                )
 
         return _ComponentsView(self)
 
