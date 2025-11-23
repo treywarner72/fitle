@@ -251,14 +251,25 @@ class Model:
             return self % x
 # ops
 
-    def __getitem__(self, map):
+    """def __getitem__(self, map):
         if INPUT in self.free:
             if not isinstance(map, dict):
                 return self % {INDEX: map}
             return self % map
         if not isinstance(map, dict):
                 return self.eval(None, {INDEX: map})
-        self.eval(None, map)
+        self.eval(None, map)"""
+    
+    def __getitem__(self, idx):
+        """Allow model[(1,0,0)] to mean args[1].args[0].args[0]."""
+        if not isinstance(idx, tuple):
+            return self.args[idx]
+
+        node = self
+        for i in idx:
+            node = node.args[i]
+        return node
+    
 
     def copy_with_args(self, args):
         return type(self)(self.fn, args)
