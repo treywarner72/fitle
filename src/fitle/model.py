@@ -64,6 +64,61 @@ class Model:
         self.args = args
         self.memory = {}
 
+    # for selecting models in trees
+    @property
+    def components(self):
+        class _ComponentsView:
+            __slots__ = ("_root", "max_chars")
+
+            def __init__(self, root, max_chars=60):
+                self._root = root
+                self.max_chars = max_chars
+
+            def __getitem__(self, idx):
+                node = self._root
+                if not isinstance(idx, tuple):
+                    return node.args[idx]
+                for i in idx:
+                    node = node.args[i]
+                return node
+
+            def __iter__(self):
+                return iter(self._root.args)
+
+            def __len__(self):
+                return len(self._root.args)
+
+            def _short(self, node):
+                s = str(node).replace("\n", " ")
+                if len(s) <= self.max_chars:
+                    return s
+                return s[: self.max_chars - 1] + "…"
+
+            def __repr__(self):
+                import numpy as np
+                from collections.abc import Iterable
+
+                lines = []
+
+                def walk(node, path=(), depth=0):
+                    indent = "  " * depth
+                    idx = "[" + ",".join(map(str, path)) + "]" if path else "[]"
+                    lines.append(f"{indent}{idx} {self._short(node)}")
+
+                    if isinstance(node, Model):
+                        for i, child in enumerate(node.args):
+                            walk(child, path + (i,), depth + 1)
+                    elif isinstance(node, Iterable) and not isinstance(
+                        node, (str, bytes, np.ndarray)
+                    ):
+                        for i, child in enumerate(node):
+                            walk(child, path + (i,), depth + 1)
+
+                walk(self._root)
+                return "<components>\n" + "\n".join(lines) + "\n</components>"
+
+        return _ComponentsView(self)
+
     @property
     def params(self):
         """A list of all the THETA params that act on the model.
@@ -251,25 +306,14 @@ class Model:
             return self % x
 # ops
 
-    """def __getitem__(self, map):
+    def __getitem__(self, map):
         if INPUT in self.free:
             if not isinstance(map, dict):
                 return self % {INDEX: map}
             return self % map
         if not isinstance(map, dict):
                 return self.eval(None, {INDEX: map})
-        self.eval(None, map)"""
-    
-    def __getitem__(self, idx):
-        """Allow model[(1,0,0)] to mean args[1].args[0].args[0]."""
-        if not isinstance(idx, tuple):
-            return self.args[idx]
-
-        node = self
-        for i in idx:
-            node = node.args[i]
-        return node
-    
+        self.eval(None, map)
 
     def copy_with_args(self, args):
         return type(self)(self.fn, args)
