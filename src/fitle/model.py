@@ -313,17 +313,25 @@ class Model:
 
     def __mod__(self, subs):
         if not isinstance(subs, dict):
-            subs = {INPUT : subs}
+            subs = {INPUT: subs}
+
         def walk(m):
+            # 1) If this node is exactly one of the keys, replace it wholesale
+            if m in subs:
+                return subs[m]
+
+            # 2) Otherwise recurse structurally
             if isinstance(m, Model):
                 return m.copy_with_args([walk(a) for a in m.args])
+
             elif isinstance(m, Iterable) and not isinstance(m, (str, bytes, np.ndarray)):
                 return type(m)(walk(x) for x in m)
-            elif isinstance(m, Param) and m in subs:
-                return subs[m]
+
+            # 3) Fallback: leave as is
             return m
 
         return walk(self)
+
 
 
 
