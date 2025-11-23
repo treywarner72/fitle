@@ -22,10 +22,20 @@ class FitResult:
         self.errors = {}
 
         i=0
+        seen = {}
         for p in model.params:
-            name = p.name if p.name else f"x{i}"; i+=1
+            base = p.name if p.name else f"x{i}"
+            if base in seen:
+                seen[base] += 1
+                name = f"{base}_{seen[base]}"
+            else:
+                seen[base] = 0
+                name = base
+
+            i += 1
             self.values[name] = p.value
             self.errors[name] = p.error
+
 
     def _populate_params(self):
         for p, v, e in zip(self.model.params, self.minimizer.values, self.minimizer.errors):

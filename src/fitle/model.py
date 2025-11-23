@@ -31,6 +31,8 @@ from collections import defaultdict
 import operator
 import functools
 from typing import Any, Optional, Tuple
+import copy as _copy
+
 
 __all__ = [
     "Model",
@@ -260,6 +262,54 @@ class Model:
 
     def copy_with_args(self, args):
         return type(self)(self.fn, args)
+
+    def copy(self):
+        """
+        Copy of the model expression tree.
+
+        - All Model / Reduction nodes are recreated
+        - THETA Params are cloned into new Param instances
+        - INPUT / INDEX Params are shared (same singletons)
+        - Lists/tuples inside args are recursively copied
+        """
+        model_memo = {}
+        param_memo = {}
+
+        def walk(node):
+            # --- Models (including Reduction via copy_with_args) ---
+            if isinstance(node, Model):
+                obj_id = id(node)
+                if obj_id in model_memo:
+                    return model_memo[obj_id]
+
+                new_args = [walk(a) for a in node.args]
+                new_node = node.copy_with_args(new_args)
+                model_memo[obj_id] = new_node
+                return new_node
+
+            # --- Params ---
+            if isinstance(node, Param):
+                # Keep INPUT/INDEX singletons shared
+                if node.kind in (Param.input, Param.index):
+                    return node
+
+                # Clone θ-params, reusing mapping so they stay consistent
+                if node in param_memo:
+                    return param_memo[node]
+
+                new_p = _copy.copy(node)   # new Param instance, same attributes
+                param_memo[node] = new_p
+                return new_p
+
+            # --- Lists / tuples inside args ---
+            if isinstance(node, (list, tuple)):
+                return type(node)(walk(a) for a in node)
+
+            # --- Scalars, ndarrays, etc. ---
+            return node
+
+        return walk(self)
+
 
     def __mod__(self, subs):
         if not isinstance(subs, dict):
