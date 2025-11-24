@@ -1,7 +1,7 @@
 import numpy as np
 from .model import Model, INPUT, const, indecise, Reduction
 from .param import Param, index
-from .mnp import exp, where, sum
+from .mnp import exp, where, sum, log
 import scipy
 
 SQRT2PI = np.sqrt(2 * np.pi)
@@ -18,7 +18,39 @@ def exponential(tau=None):
     tau = tau if tau is not None else Param.positive('tau')
     return (1 / tau) * np.e ** (-INPUT / tau)
 
-def crystalball(alpha, n, xbar, sigma):
+def crystalball(alpha, n, mu, sigma):
+    """
+    Crystal Ball PDF.
+
+    alpha > 0 : transition point in units of sigma
+    n         : tail power
+    mu        : mean
+    sigma     : width
+    """
+
+    x = INPUT
+    t = (x - mu) / sigma          # (x - μ)/σ
+
+    pref      = n / alpha     # n/|α|
+    B         = pref - alpha  # n/|α| - |α|
+    C = n / (alpha * (n - 1)) * exp(-0.5 * alpha**2)
+    D = np.sqrt(0.5*np.pi) * (1 + Model(lambda a: scipy.special.erf(a), [alpha/np.sqrt(2)]))
+
+    N = 1.0 / (sigma * (C + D))
+
+    # --- core Gaussian part ---
+    core = exp(-0.5 * t**2)
+
+    # --- tail: computed fully in log-space ---
+    # logA = n*log(n/|α|) - α²/2
+    logA      = n * log(pref) - 0.5 * alpha**2
+    log_tail  = logA - n * log(B - t)
+    tail      = exp(log_tail)
+
+    # --- piecewise: Gaussian for t > -α, tail otherwise ---
+    return where(t > -alpha, N * core, N * tail)
+
+"""def crystalball(alpha, n, xbar, sigma):
     x = INPUT
     n_over_alpha = n/alpha
     pexp = exp(-0.5*alpha ** 2)
@@ -33,7 +65,7 @@ def crystalball(alpha, n, xbar, sigma):
     return where((x - xbar)/sigma > -alpha, 
               N*exp(-0.5*((x-xbar)/sigma)**2),
               N*A*(B - (x-xbar)/sigma)**-n
-             )
+             )"""
 
 
 def convolve(d_x, c, mass_mother, mu, sigma, idx=None):
