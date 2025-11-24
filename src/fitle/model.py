@@ -36,7 +36,8 @@ import copy as _copy
 
 __all__ = [
     "Model",
-    "indecise"
+    "indecise",
+    "identity"
 ]
 
 class Model:
@@ -67,106 +68,38 @@ class Model:
     # for selecting models in trees
     @property
     def components(self):
-        class _ComponentsView:
-            __slots__ = ("_root", "max_chars")
+        """
+        Return a 1D list of components obtained by walking the tree
+        and cutting at nodes with fn == iden.
 
-            def __init__(self, root, max_chars=60):
-                self._root = root
-                self.max_chars = max_chars
+        - Traverse the expression tree depth-first.
+        - Whenever we see a Model with fn is iden, we treat its *inner*
+          expression as a single component and do not recurse further.
+        - If there are no iden boundaries at all, return [self].
+        """
+        comps = []
 
-            # ----- tree navigation -----
+        def walk(node):
+            # Only care about Model nodes structurally
+            if not isinstance(node, Model):
+                return
 
-            def __getitem__(self, idx):
-                node = self._root
-                if not isinstance(idx, tuple):
-                    return node.args[idx]
-                for i in idx:
-                    node = node.args[i]
-                return node
+            # If this is a boundary: stop and record the inner expression
+            if node.fn is iden or getattr(node.fn, "__name__", "") == "iden":
+                if node.args:
+                    comps.append(node.args[0])
+                else:
+                    comps.append(node)
+                return
 
-            def __iter__(self):
-                return iter(self._root.args)
+            # Otherwise recurse into children
+            for a in node.args:
+                walk(a)
 
-            def __len__(self):
-                return len(self._root.args)
+        walk(self)
 
-            # ----- helpers -----
-
-            def _short(self, node):
-                s = str(node).replace("\n", " ")
-                if len(s) <= self.max_chars:
-                    return s
-                return s[: self.max_chars - 1] + "…"
-
-            # ----- text repr (terminal / logs) -----
-
-            def __repr__(self):
-                lines = []
-
-                def walk(node, path=(), depth=0):
-                    indent = "  " * depth
-                    idx = "[" + ",".join(map(str, path)) + "]" if path else "[]"
-                    lines.append(f"{indent}{idx} {self._short(node)}")
-
-                    if isinstance(node, Model):
-                        for i, child in enumerate(node.args):
-                            walk(child, path + (i,), depth + 1)
-                    elif isinstance(node, Iterable) and not isinstance(
-                        node, (str, bytes, np.ndarray)
-                    ):
-                        for i, child in enumerate(node):
-                            walk(child, path + (i,), depth + 1)
-
-                walk(self._root)
-                return "<components>\n" + "\n".join(lines) + "\n</components>"
-
-            # ----- HTML repr (Jupyter) -----
-
-            def _repr_html_(self):
-                def esc(s: str) -> str:
-                    return (
-                        s.replace("&", "&amp;")
-                        .replace("<", "&lt;")
-                        .replace(">", "&gt;")
-                    )
-
-                def render(node, path=()):
-                    idx = "[" + ",".join(map(str, path)) + "]" if path else "[]"
-                    label = esc(f"{idx} {self._short(node)}")
-
-                    # children?
-                    children = []
-                    if isinstance(node, Model):
-                        children = list(node.args)
-                    elif isinstance(node, Iterable) and not isinstance(
-                        node, (str, bytes, np.ndarray)
-                    ):
-                        children = list(node)
-
-                    if not children:
-                        # leaf
-                        return f"<div style='margin-left:1em;font-family:monospace'>{label}</div>"
-
-                    # internal node with collapsible details
-                    inner = "".join(
-                        render(child, path + (i,)) for i, child in enumerate(children)
-                    )
-                    return (
-                        "<details style='margin-left:0.5em'>"
-                        f"<summary style='font-family:monospace'>{label}</summary>"
-                        f"{inner}"
-                        "</details>"
-                    )
-
-                body = render(self._root, ())
-                return (
-                    "<div class='components-tree' "
-                    "style='font-family:monospace; font-size: 12px'>"
-                    f"{body}"
-                    "</div>"
-                )
-
-        return _ComponentsView(self)
+        # If no iden nodes found, the whole model is a single component
+        return comps or [self]
 
     @property
     def params(self):
@@ -629,8 +562,6 @@ class Reduction(Model):
 
 # Useful methods
 
-def identity(x): return x
-
 def const(val):
     f = lambda val=val: val
     f.__name__ = f"const"
@@ -674,12 +605,14 @@ def _grad_fn(model, wrt):
 
     if isinstance(model, Model) and not model.args:
         # constant Model (i.e., const(...))
-        return 0
+        return _zero()
 
     fn = getattr(model.fn, '__name__', None)
     args = model.args
 
     # unary ops
+    if fn == 'iden':
+        return _grad_fn(args[0], wrt)
     if fn == 'neg':
         return -_grad_fn(args[0], wrt)
     if fn == 'exp':
@@ -766,16 +699,19 @@ def _grad(self, wrt=None):
         def stack_fn(*args):
             return np.array(args)
         stack_fn.__name__ = "vector"
-        return Model(stack_fn, [_grad_fn(self, p).simplify() for p in wrt])
+        return Model(stack_fn, [ensure_model(_grad_fn(self, p)).simplify() for p in wrt])
     raise TypeError(f"grad expects Param, list of Param, or None, got {type(wrt)}")
 
 
 Model.grad = _grad
 
-def identity(x): return x
+def iden(x): return x
+
+def identity(val):
+    return Model(iden, [val])
 
 def ensure_model(x):
-    return x if isinstance(x, Model) else Model(identity, [x])
+    return x if isinstance(x, Model) else identity(x)
 
 def simplify(m):
     if not isinstance(m, Model):
