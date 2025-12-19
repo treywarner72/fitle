@@ -1,6 +1,6 @@
 import numpy as np
 import iminuit
-from .model import Model
+from .model import Model, const
 from .param import Param
 import matplotlib.pyplot as plt
 
@@ -11,7 +11,7 @@ class FitResult:
         self.model = model
         self.cost = model.memory['cost'] if "cost" in model.memory else "No memory"
         self.bin_widths = self.cost.bin_widths() if self.cost != "No memory" else 1
-        self.predict = model.memory['base'].freeze() * fl.const(self.bin_widths) if "base" in model.memory else "No memory"
+        self.predict = model.memory['base'].freeze() * const(self.bin_widths) if "base" in model.memory else "No memory"
         if self.cost != "No memory":
             self.x = self.cost.x()
             self.y = self.cost.y()
