@@ -2,6 +2,10 @@ import numpy as np
 from .model import Model, const
 from .mnp import log, sum, where
 
+import numpy as np
+from .model import Model, const
+from .mnp import log, sum, where
+
 class Cost:
     """
     A unified class for generating and calculating various cost functions for model fitting.
@@ -14,10 +18,12 @@ class Cost:
         x (const): Constant representation of the independent variable data.
         y (const, optional): Constant representation of the dependent variable data
                              (observed counts/values). `None` for some NLL cases.
+        bin_widths (const, optional): Constant representation of bin widths for binned data.
     """
-    def __init__(self, x_data, y_data=None):
+    def __init__(self, x_data, y_data=None, bin_widths=None):
         self.x = const(x_data)
         self.y = const(y_data) if y_data is not None else None
+        self.bin_widths = const(bin_widths) if bin_widths is not None else None
         self.fcn = self._base_fcn # Assign the method to the attribute
 
     def _base_fcn(self, *args):
@@ -48,41 +54,67 @@ class Cost:
     NLL = unbinnedNLL
 
     @classmethod
-    def chi2(cls, data=None, bins=None, range=None, x=None, y=None, zero_method='error'):
+    def chi2(cls, data=None, bins=None, range=None, x=None, y=None, bin_widths=None, zero_method='error'):
         if data is not None and bins is not None:
             if x is not None or y is not None:
                 raise ValueError("Cannot provide both 'data' and 'x,y' for binned cost functions.")
-            centers, counts = bin(data, bins, range)
-            cost_instance = cls(centers, counts)
+            centers, counts, edges = bin(data, bins, range)
+            widths = np.diff(edges)
+            cost_instance = cls(centers, counts, widths)
         elif x is not None and y is not None:
-            cost_instance = cls(x, y)
+            # Calculate bin widths from centers if not provided
+            if bin_widths is None:
+                x_arr = np.asarray(x)
+                # Calculate widths from spacing between centers
+                if len(x_arr) > 1:
+                    # Use differences between adjacent centers
+                    center_diffs = np.diff(x_arr)
+                    # Assume first and last bins have same width as their neighbors
+                    widths = np.concatenate([[center_diffs[0]], center_diffs])
+                else:
+                    raise ValueError("Cannot infer bin widths from a single bin center. Please provide bin_widths explicitly.")
+            cost_instance = cls(x, y, bin_widths)
         else:
-            raise ValueError("For chi2, provide either 'data' and 'bins' (and optional 'range') or 'x' and 'y'.")
+            raise ValueError("For chi2, provide either 'data' and 'bins' (and optional 'range') or 'x', 'y', and 'bin_widths'.")
 
         if np.any(cost_instance.y() == 0):
             if zero_method == 'absolute':
                 condition = cost_instance.y > 0
                 y_star = where(cost_instance.y>0, cost_instance.y, 1)
-                cost_instance.fcn = lambda model: sum((cost_instance.y - model % cost_instance.x) ** 2 / y_star)
+                # Scale model predictions by bin width
+                cost_instance.fcn = lambda model: sum(
+                    ((cost_instance.y - (model % cost_instance.x) * cost_instance.bin_widths) ** 2) / y_star
+                )
                 return cost_instance
-            raise ValueError("Chi2 calculation requires that all observed counts (y) be non-zero.")
+            raise ValueError("Chi2 calculation requires that all observed counts (y) be non-zero unless zero_method is set to 'absolute'.")
         
-        cost_instance.fcn = lambda model: Model(np.sum, [((cost_instance.y - model % cost_instance.x) ** 2) / cost_instance.y])
+        # Scale model predictions by bin width for proper chi-squared
+        cost_instance.fcn = lambda model: Model(
+            np.sum, 
+            [((cost_instance.y - (model % cost_instance.x) * cost_instance.bin_widths) ** 2) / cost_instance.y]
+        )
         return cost_instance
 
     @classmethod
-    def binnedNLL(cls, data=None, bins=None, range=None, x=None, y=None):
+    def binnedNLL(cls, data=None, bins=None, range=None, x=None, y=None, bin_widths=None):
         if data is not None and bins is not None:
             if x is not None or y is not None:
                 raise ValueError("Cannot provide both 'data' and 'x,y' for binned cost functions.")
-            centers, counts = bin(data, bins, range)
-            cost_instance = cls(centers, counts)
+            centers, counts, edges = bin(data, bins, range)
+            widths = np.diff(edges)
+            cost_instance = cls(centers, counts, widths)
         elif x is not None and y is not None:
-            cost_instance = cls(x, y)
+            if bin_widths is None:
+                raise ValueError("When providing x and y directly, you must also provide bin_widths.")
+            cost_instance = cls(x, y, bin_widths)
         else:
-            raise ValueError("For binned_nll, provide either 'data' and 'bins' (and optional 'range') or 'x' and 'y'.")
+            raise ValueError("For binned_nll, provide either 'data' and 'bins' (and optional 'range') or 'x', 'y', and 'bin_widths'.")
 
-        cost_instance.fcn = lambda model: 2 * sum(model % cost_instance.x - cost_instance.y * log(model % cost_instance.x))
+        # Scale model predictions by bin width
+        cost_instance.fcn = lambda model: 2 * sum(
+            (model % cost_instance.x) * cost_instance.bin_widths - 
+            cost_instance.y * log((model % cost_instance.x) * cost_instance.bin_widths)
+        )
         return cost_instance
 
 def bin(data, bins, range=None):
@@ -101,8 +133,9 @@ def bin(data, bins, range=None):
         tuple: A tuple containing:
                - centers (ndarray): The centers of the bins.
                - counts (ndarray): The number of data points in each bin.
+               - edges (ndarray): The bin edges.
     """
     counts, edges = np.histogram(data, bins=bins, range=range)
     centers = 0.5 * (edges[1:] + edges[:-1])
     counts = counts.astype(np.float64)
-    return centers, counts
+    return centers, counts, edges
