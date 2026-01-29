@@ -538,9 +538,11 @@ class Model:
             except Exception:
                 return "const(?)"
             if isinstance(val, np.ndarray):
-                # shorten big arrays but show dtype/shape
+                # Show small arrays fully, large arrays with first/last elements
                 if val.size <= 6:
                     return f"{val}"
+                elif val.ndim == 1:
+                    return f"[{val[0]:.4g}, {val[1]:.4g}, ..., {val[-2]:.4g}, {val[-1]:.4g}]"
                 else:
                     return f"const(array, shape={val.shape}, dtype={val.dtype})"
             else:

@@ -22,11 +22,26 @@ def crystalball(alpha, n, mu, sigma):
     """
     Crystal Ball PDF.
 
-    alpha > 0 : transition point in units of sigma
-    n         : tail power
+    alpha > 0 : transition point in units of sigma (typical: 0.5-5)
+    n > 1     : tail power (typical: 1.5-10)
     mu        : mean
     sigma     : width
     """
+    import warnings
+
+    # Warn about extreme parameter values that may cause numerical issues
+    def _check_param(p, name, min_val, max_val):
+        if isinstance(p, Param):
+            val = p.start if p.start is not None else p.value
+            if val is not None and (val < min_val or val > max_val):
+                warnings.warn(
+                    f"crystalball {name}={val} is outside typical range [{min_val}, {max_val}]. "
+                    f"Extreme values may cause numerical issues.",
+                    UserWarning, stacklevel=2
+                )
+
+    _check_param(alpha, 'alpha', 0.1, 10)
+    _check_param(n, 'n', 1.01, 50)
 
     x = INPUT
     t = (x - mu) / sigma          # (x - μ)/σ
