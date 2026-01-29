@@ -1,5 +1,6 @@
 import numpy as np
 import iminuit
+import warnings
 from .model import Model, const
 from .param import Param
 import matplotlib.pyplot as plt
@@ -9,17 +10,29 @@ class FitResult:
     def __init__(self, model, m):
         self.minimizer = m
         self.model = model
-        self.cost = model.memory['cost'] if "cost" in model.memory else "No memory"
-        self.bin_widths = self.cost.bin_widths() if self.cost != "No memory" and self.cost.bin_widths else 1
-        if self.cost != "No memory" and self.cost.bin_widths is not None:
+
+        if "cost" not in model.memory:
+            raise ValueError(
+                f"Model was not created with a Cost function.\n"
+                f"  Use: model | Cost.NLL(data) or model | Cost.MSE(x, y)\n"
+                f"  Got: {model}"
+            )
+        self.cost = model.memory['cost']
+
+        if self.cost.bin_widths is not None:
             bw = self.cost.bin_widths()
             self.bin_widths = bw if bw is not None else 1
         else:
             self.bin_widths = 1
-        self.predict = model.memory['base'].freeze() * const(self.bin_widths) if "base" in model.memory else "No memory"
-        if self.cost != "No memory":
-            self.x = self.cost.x()
-            self.y = self.cost.y() if self.cost.y is not None else None
+
+        if "base" not in model.memory:
+            raise ValueError(
+                f"Model has no base expression stored.\n"
+                f"  This usually means the Cost was not applied correctly."
+            )
+        self.predict = model.memory['base'].freeze() * const(self.bin_widths)
+        self.x = self.cost.x()
+        self.y = self.cost.y() if self.cost.y is not None else None
         self.fval = m.fval
         self.success = m.valid
         self._populate_params()
@@ -71,9 +84,12 @@ class FitResult:
             raise ValueError("dof() not available for unbinned fits")
         return len(self.cost.x()) - len(self.values) 
 
-def fit(model, numba=True, grad=True, ncall = 9999999, options={}):
+def fit(model, numba=True, grad=True, ncall=9999999, options={}):
     if not isinstance(model, Model) or not callable(model):
-        raise TypeError("expected a Model instance")
+        raise TypeError(
+            f"Expected a Model instance, got {type(model).__name__}.\n"
+            f"  Create a model using Param, Cost, and arithmetic operations."
+        )
 
     # Try gradient construction
     grad_model = None
@@ -81,7 +97,14 @@ def fit(model, numba=True, grad=True, ncall = 9999999, options={}):
         try:
             grad_model = model.grad()
         except Exception as e:
-            print(f"[fit] Warning: gradient disabled ({e})")
+            warnings.warn(
+                f"Gradient computation failed, falling back to numerical gradients.\n"
+                f"  Reason: {e}\n"
+                f"  Model: {model}\n"
+                f"  Tip: Use grad=False to suppress this warning.",
+                UserWarning,
+                stacklevel=2
+            )
             grad = False
 
     # Try compilation
@@ -91,21 +114,44 @@ def fit(model, numba=True, grad=True, ncall = 9999999, options={}):
             if grad and grad_model is not None:
                 grad_model.compile()
         except Exception as e:
-            print(f"[fit] Warning: numba compile disabled ({e})")
+            warnings.warn(
+                f"Numba compilation failed, falling back to Python.\n"
+                f"  Reason: {e}\n"
+                f"  Model: {model}\n"
+                f"  Tip: Use numba=False to suppress this warning.",
+                UserWarning,
+                stacklevel=2
+            )
             numba = False
-
 
     params = model.params
 
     def loss_fn(*theta):
         for p, v in zip(params, theta):
             p.value = v
-        return model.eval(None,{})
+        try:
+            return model.eval(None, {})
+        except Exception as e:
+            param_info = ", ".join(f"{p.name}={v:.4g}" for p, v in zip(params, theta))
+            raise RuntimeError(
+                f"Model evaluation failed during fitting.\n"
+                f"  Parameters: {param_info}\n"
+                f"  Model: {model}\n"
+                f"  Original error: {e}"
+            ) from e
 
     def grad_fn(*theta):
         for p, v in zip(params, theta):
             p.value = v
-        return grad_model.eval(None, {})
+        try:
+            return grad_model.eval(None, {})
+        except Exception as e:
+            param_info = ", ".join(f"{p.name}={v:.4g}" for p, v in zip(params, theta))
+            raise RuntimeError(
+                f"Gradient evaluation failed during fitting.\n"
+                f"  Parameters: {param_info}\n"
+                f"  Original error: {e}"
+            ) from e
 
     start = [p.start for p in params]
     bounds = [(p.min, p.max) for p in params]

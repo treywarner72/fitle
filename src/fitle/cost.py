@@ -26,6 +26,22 @@ class Cost:
         if bin_widths is not None and not isinstance(bin_widths, np.ndarray):
             bin_widths = np.asarray(bin_widths)
 
+        # Validate array lengths
+        if len(x_data) == 0:
+            raise ValueError("x cannot be empty.")
+        if y_data is not None:
+            if len(x_data) != len(y_data):
+                raise ValueError(
+                    f"x and y must have the same length.\n"
+                    f"  Got x: {len(x_data)} elements, y: {len(y_data)} elements."
+                )
+        if bin_widths is not None:
+            if len(bin_widths) != len(x_data):
+                raise ValueError(
+                    f"bin_widths must have the same length as x.\n"
+                    f"  Got x: {len(x_data)} elements, bin_widths: {len(bin_widths)} elements."
+                )
+
         self.x = const(x_data)
         self.y = const(y_data) if y_data is not None else None
         self.bin_widths = const(bin_widths) if bin_widths is not None else None

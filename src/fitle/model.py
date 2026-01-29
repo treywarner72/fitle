@@ -65,6 +65,23 @@ class Model:
         self.args = args
         self.memory = {}
 
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        """Handle numpy ufuncs like np.exp, np.sin, np.add, etc."""
+        if method != '__call__':
+            return NotImplemented
+
+        def inner(*inner_args):
+            return ufunc(*inner_args, **kwargs)
+        inner.__name__ = ufunc.__name__
+        return Model(inner, list(inputs))
+
+    def __array_function__(self, func, types, args, kwargs):
+        """Handle numpy functions like np.dot, np.matmul, np.sum, etc."""
+        def inner(*inner_args, **inner_kwargs):
+            return func(*inner_args, **inner_kwargs)
+        inner.__name__ = func.__name__
+        return Model(inner, list(args))
+
     # for selecting models in trees
     @property
     def components(self):
@@ -236,6 +253,12 @@ class Model:
         return walk(self, other)
 
     def eval_py(self, x, index_map):
+        import warnings
+
+        # Collect warnings with their model context
+        collected_warnings = []
+        seen_base_messages = set()
+
         def _eval(m):
             if isinstance(m, Reduction):
                 index = m.index
@@ -246,7 +269,19 @@ class Model:
                 )
 
             if isinstance(m, Model):
-                return m.fn(*[_eval(arg) for arg in m.args])
+                # Capture numpy warnings and add model context
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    result = m.fn(*[_eval(arg) for arg in m.args])
+
+                for w in caught:
+                    base_msg = str(w.message).split("\n")[0]
+                    # Only keep the first occurrence (innermost expression)
+                    if base_msg not in seen_base_messages:
+                        seen_base_messages.add(base_msg)
+                        collected_warnings.append((base_msg, m, w.category))
+
+                return result
             if isinstance(m, Param):
                 if m.kind == Param.theta:
                     return m.value
@@ -254,10 +289,21 @@ class Model:
                     return x
                 if m.kind == Param.index:
                     return index_map[m]
-                raise Exception(f"unknown param kind: {m}")
+                raise ValueError(
+                    f"Unknown parameter kind: {m.kind!r}.\n"
+                    f"  Expected: Param.theta, Param.input, or Param.index.\n"
+                    f"  This usually indicates a corrupted Param object."
+                )
             return m
 
-        return _eval(self)
+        result = _eval(self)
+
+        # Emit all collected warnings after evaluation completes
+        for base_msg, model_expr, category in collected_warnings:
+            msg = f"{base_msg}\n  In expression: {model_expr}"
+            warnings.warn(msg, category, stacklevel=4)
+
+        return result
 
     def eval(self, x, index_map, numba=False):
         if not self.params:
@@ -279,8 +325,18 @@ class Model:
     def __call__(self, x=None):
         if x is not None and not isinstance(x, np.ndarray):
             x = np.asarray(x)
-        if INPUT in self.free and x is None: raise Exception("Cannot __call__() with free X")
-        if INPUT not in self.free and x is not None: raise Exception("Cannot __call__(x) without free X")
+        if INPUT in self.free and x is None:
+            raise TypeError(
+                f"Model requires input data but none provided.\n"
+                f"  Call as: model(x) where x is your data array.\n"
+                f"  Model: {self}"
+            )
+        if INPUT not in self.free and x is not None:
+            raise TypeError(
+                f"Model doesn't accept input data.\n"
+                f"  This model has no INPUT dependency, call as: model()\n"
+                f"  Model: {self}"
+            )
         if not self.free:
             return self.eval(None, {})
         if self.free == [INPUT]:
@@ -564,6 +620,9 @@ class Reduction(Model):
 # Useful methods
 
 def const(val):
+    # Convert lists/tuples to arrays for consistency and hashability
+    if isinstance(val, (list, tuple)):
+        val = np.asarray(val)
     f = lambda val=val: val
     f.__name__ = f"const"
     return Model(f, [])
@@ -689,7 +748,11 @@ def _grad_fn(model, wrt):
         dx = _grad_fn(x, wrt)
         dy = _grad_fn(y, wrt)
         return Model(np.where, [cond, dx, dy])
-    raise Exception(f"Cannot differentiate {fn}")
+    raise ValueError(
+        f"Cannot differentiate operation '{fn}'.\n"
+        f"  Supported: add, sub, mul, div, pow, neg, exp, sqrt, log, sum, where, indecise.\n"
+        f"  Consider using grad=False in fit() for numerical gradients."
+    )
 
 def _grad(self, wrt=None):
     if wrt is None:

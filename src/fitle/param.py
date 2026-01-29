@@ -134,6 +134,32 @@ class Param:
         return id(self)
 
     # ------------------------------------------------------------------
+    #   NumPy dispatch protocols
+    # ------------------------------------------------------------------
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        """Handle numpy ufuncs like np.exp, np.sin, np.add, etc."""
+        if method != '__call__':
+            return NotImplemented
+        # Late import to avoid circular dependency
+        from .model import Model
+
+        def inner(*inner_args):
+            return ufunc(*inner_args, **kwargs)
+        inner.__name__ = ufunc.__name__
+        return Model(inner, list(inputs))
+
+    def __array_function__(self, func, types, args, kwargs):
+        """Handle numpy functions like np.dot, np.matmul, np.sum, etc."""
+        # Late import to avoid circular dependency
+        from .model import Model
+
+        def inner(*inner_args, **inner_kwargs):
+            return func(*inner_args, **inner_kwargs)
+        inner.__name__ = func.__name__
+        return Model(inner, list(args))
+
+    # ------------------------------------------------------------------
     #   Printable helpers
     # ------------------------------------------------------------------
     def _prefix(self) -> str:
