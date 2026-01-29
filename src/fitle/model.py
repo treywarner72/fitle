@@ -335,6 +335,9 @@ class Model:
             return self.eval_py(x, index_map)
 
     def __call__(self, x=None):
+        # If x is a Param/Model, treat as substitution, not evaluation
+        if isinstance(x, (Param, Model)):
+            return self % x
         if x is not None and not isinstance(x, np.ndarray):
             x = np.asarray(x)
         if INPUT in self.free and x is None:
