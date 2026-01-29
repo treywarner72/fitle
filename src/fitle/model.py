@@ -37,7 +37,8 @@ import copy as _copy
 __all__ = [
     "Model",
     "indecise",
-    "identity"
+    "identity",
+    "vector"
 ]
 
 class Model:
@@ -781,10 +782,7 @@ def _grad(self, wrt=None):
     if isinstance(wrt, Param):
         return ensure_model(_grad_fn(self, wrt)).simplify()
     if isinstance(wrt, (list, tuple)):
-        def stack_fn(*args):
-            return np.array(args)
-        stack_fn.__name__ = "vector"
-        return Model(stack_fn, [ensure_model(_grad_fn(self, p)).simplify() for p in wrt])
+        return vector(*[ensure_model(_grad_fn(self, p)).simplify() for p in wrt])
     raise TypeError(f"grad expects Param, list of Param, or None, got {type(wrt)}")
 
 
@@ -797,6 +795,13 @@ def identity(val):
 
 def ensure_model(x):
     return x if isinstance(x, Model) else identity(x)
+
+def vector(*models):
+    """Create a Model that evaluates multiple models and stacks results."""
+    def stack_fn(*args):
+        return np.array(args)
+    stack_fn.__name__ = "vector"
+    return Model(stack_fn, [ensure_model(m) for m in models])
 
 def _is_scalar_equal(x, val):
     """Check if x equals val, handling floats with tolerance."""
