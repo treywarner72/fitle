@@ -187,7 +187,6 @@ class Model:
                     return repr(f)
 
                 return ("model", _fn_key(fn), tuple(walk(arg) for arg in m.args))
-                return (fn_id, tuple(walk(arg) for arg in m.args))
             elif isinstance(m, np.ndarray):
                 return ("ndarray", m.shape, m.dtype.str, tuple(m.flatten().tolist()))
             elif isinstance(m, (list, tuple)):
@@ -295,7 +294,7 @@ class Model:
             return self % map
         if not isinstance(map, dict):
                 return self.eval(None, {INDEX: map})
-        self.eval(None, map)
+        return self.eval(None, map)
 
     def copy_with_args(self, args):
         return type(self)(self.fn, args)
@@ -519,7 +518,7 @@ def bind_ops(cls):
                 return Model(fn, [self])
             if not isinstance(other, typing.Hashable):
                 other = const(other)
-            return Model(fn, [self, other]) if 'r' not in name else Model(fn, [other, self])
+            return Model(fn, [self, other])# if 'r' not in name else Model(fn, [other, self])
         setattr(cls, name, op_method)
 
 bind_ops(Model)
@@ -731,7 +730,7 @@ def simplify(m):
             return 0
         args = [arg for arg in args if not is_one(arg)]
         if len(args) == 0:
-            return 0
+            return 1
         if len(args) == 1:
             return ensure_model(args[0])
         return Model(m.fn, args)

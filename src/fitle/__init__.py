@@ -5,5 +5,5 @@ from .cost import *
 from .pdfs import *
 from .compiler import *
 
-__all__ = ["Param", "index", "INPUT", "INDEX", "Model","identity", "Reduction","const","indecise","fit","FitResult","Cost","gaussian", "exponential", "crystalball", "convolution", "Compiler"]
+__all__ = ["Param", "index", "INPUT", "INDEX", "Model","identity", "Reduction","const","indecise","fit","FitResult","Cost","gaussian", "exponential", "crystalball", "convolve", "Compiler"]
 __version__ = "0.1.0"

@@ -84,7 +84,7 @@ g1 = gaussian(Param('mu1')(1870), Param.positive('s1')(5))
 g2 = gaussian(Param('mu2')(1970), Param.positive('s2')(10))
 tail = (1.0 / tau) * np.e ** (-(INPUT - 1840) / tau)
 
-composite = Param.positive('n_gauss_1')(5e5)*g1 + Param.positive('n_gauss_2')(5e5)*g2 + Q(6e4)*Param.positive('n_tail')
+composite = Param.positive('n_gauss_1')(5e5)*g1 + Param.positive('n_gauss_2')(5e5)*g2 + Param.positive('n_tail')(6e4)*tail
 ```
 
 ---
@@ -99,12 +99,12 @@ data_x, data_y = [...], [...]
 cost1 = linear_model % {INPUT : data_x} # % replaces elements in the model according to a dictionary
 cost1() # returns an array of the prediction for each data_x value
 cost2 = (data_y - cost1) ** 2 # represents the error squared
-cost = mnp.sum(cost2) # represents the sum of squared errors
+cost = fl.mnp.sum(cost2) # represents the sum of squared errors
 
 fit(cost) # minimizes the sum of squared errors with respect to a and b
 ```
 
-There are of couse built in functions to do this. Let `model` be a placeholder model to be fitted.
+There are of course built in functions to do this. Let `model` be a placeholder model to be fitted.
 
 ```py
 # Mean squared error on paired (x, y)
@@ -152,7 +152,7 @@ There is no need to define all the steps. Here is an example:
 
 ```py
 #define model
-model = Param.postiive('n_signal') * gaussian() + Param.positive('n_background') * (Param('a')*INPUT + Param(B))
+model = Param.positive('n_signal') * gaussian() + Param.positive('n_background') * (Param('a')*INPUT + Param('b'))
 
 # fit the model with respect to the data
 res = fit(model | Cost.NLL(data))
@@ -162,7 +162,7 @@ plt.plot(x, model(x))
 plt.text(f"signal count: {res.values['n_signal']}")
 
 # or
-n_signal = Param.postiive('n_signal')
+n_signal = Param.positive('n_signal')
 model = n_signal * ...
 fit(model | Cost.NLL(data))
 ...
@@ -201,10 +201,10 @@ mass1 = Param('mDp')(1800, 2000)(1870)
 sig5  = Param.positive('s5')(5)
 sig10 = Param.positive('s10')(10)
 
-signal = Param.postiive(5e5)*convolve(i, histogram_centers, histogram_counts, 1869.65, mass1, sig5) \
-       + Param.postiive(5e5)*convolve(i, histogram_centers, histogram_counts, 1869.65, mass1, sig10)
+signal = Param.positive('n_sig1')(5e5)*convolve(i, histogram_centers, histogram_counts, 1869.65, mass1, sig5) \
+       + Param.positive('n_sig2')(5e5)*convolve(i, histogram_centers, histogram_counts, 1869.65, mass1, sig10)
 
-background = Q(4e4) * exponential(tau=Param.positive('tau')(100)) % (INPUT-1840)
+background = Param.positive('n_bg')(4e4) * exponential(tau=Param.positive('tau')(100)) % (INPUT-1840)
 model_conv = signal + background
 
 loss = model_conv | Cost.chi2(data=particle_mass_distribution, bins=200, range=(1840, 2040))
@@ -231,11 +231,11 @@ The compiler also caches the structure of the model, so if you have a same model
 
 ## Plotting
 
-An execellent characteristic of this package is the ease of plotting. Let's say we have a model composed of two signals and a background. It's very easy to plot the components seperately.
+An excellent characteristic of this package is the ease of plotting. Let's say we have a model composed of two signals and a background. It's very easy to plot the components separately.
 
 ```py
 model = signal_1 + signal_2 + background
-fit(model | NLL(data))
+fit(model | Cost.NLL(data))
 
 x = np.linspace(0,100,100)
 plt.plot(x, model(x))
@@ -268,7 +268,7 @@ exponential(tau=None)
 # Model methods
 Model.grad(wrt=None)                 # -> Model of gradients
 Model.simplify()                     # basic algebraic simplifications
-Model.shape(obj)                     # infer output shape
+model.shape                          # infer output shape (property)
 Model.compile()                      # JIT compile; code at .code
 Model.freeze()                       # substitute θ with current .value
 Model.__mod__(subs)                  # substitute by dict, supports {INPUT: x}
@@ -300,7 +300,7 @@ class FitResult:
   - `{INPUT: x_array}` feeds data,
   - `x_array` is shorthand for above,
   - `{param_obj: value_or_model}` replaces parameters or subgraphs.
-- χ² requires non-zero counts unless you set the zero_mode to "absolute", to ignore those bins with no counts.
+- χ² requires non-zero counts unless you set `zero_method='absolute'` to ignore bins with no counts.
 
 ---
 

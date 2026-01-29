@@ -10,11 +10,16 @@ class FitResult:
         self.minimizer = m
         self.model = model
         self.cost = model.memory['cost'] if "cost" in model.memory else "No memory"
-        self.bin_widths = self.cost.bin_widths() if self.cost != "No memory" else 1
+        self.bin_widths = self.cost.bin_widths() if self.cost != "No memory" and self.cost.bin_widths else 1
+        if self.cost != "No memory" and self.cost.bin_widths is not None:
+            bw = self.cost.bin_widths()
+            self.bin_widths = bw if bw is not None else 1
+        else:
+            self.bin_widths = 1
         self.predict = model.memory['base'].freeze() * const(self.bin_widths) if "base" in model.memory else "No memory"
         if self.cost != "No memory":
             self.x = self.cost.x()
-            self.y = self.cost.y()
+            self.y = self.cost.y() if self.cost.y is not None else None
         self.fval = m.fval
         self.success = m.valid
         self._populate_params()
@@ -52,13 +57,19 @@ class FitResult:
         return ret
     
     def plot_data(self):
-        plt.errorbar(self.cost.x(), self.cost.y(), linestyle='', marker='.', color='black', yerr=np.sqrt(self.cost.y()))
+        if self.y is None:
+            raise ValueError("plot_data() not available for unbinned fits")
+        plt.errorbar(self.x, self.y, linestyle='', marker='.', color='black', yerr=np.sqrt(self.y))
         
     def plot_fit(self):
-        plt.plot(self.cost.x(), self.predict(self.cost.x()))
+        if self.y is None:
+            raise ValueError("plot_data() not available for unbinned fits")
+        plt.plot(self.x, self.predict(self.x))
     
     def dof(self):
-        return len(self.cost.x()) - len(self.values) - 1
+        if self.y is None:
+            raise ValueError("dof() not available for unbinned fits")
+        return len(self.cost.x()) - len(self.values) 
 
 def fit(model, numba=True, grad=True, ncall = 9999999, options={}):
     if not isinstance(model, Model) or not callable(model):
@@ -89,13 +100,12 @@ def fit(model, numba=True, grad=True, ncall = 9999999, options={}):
     def loss_fn(*theta):
         for p, v in zip(params, theta):
             p.value = v
-        return model.eval(0,0)
-        #return sum(model.call(0))
+        return model.eval(None,{})
 
     def grad_fn(*theta):
         for p, v in zip(params, theta):
             p.value = v
-        return grad_model.eval(None, None)
+        return grad_model.eval(None, {})
 
     start = [p.start for p in params]
     bounds = [(p.min, p.max) for p in params]

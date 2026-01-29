@@ -7,7 +7,7 @@ name = "fitle"
 version = "0.1.0"
 description = "A tiny, fast library for building statistical models, compiling them to Numba, and fitting with iminuit."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     { name="Trey Warner", email="trey.warner@hey.com" }
@@ -16,6 +16,7 @@ dependencies = [
     "numpy",
     "numba",
     "iminuit",
+    "scipy"
 ]
 
 [project.optional-dependencies]

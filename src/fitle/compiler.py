@@ -53,6 +53,8 @@ class Compiler:
         self._globals  = []           # list[_IRNode]    – deps == ∅
         self._idx_vars = {}
         self._final    = None         # _IRNode that yields return value
+        self._hoisted_consts: dict = {}
+        self._hoisted_fns   : dict = {}
 
     # ------------------------------------------------------------------ #
     #  PUBLIC ENTRY
@@ -243,7 +245,7 @@ class Compiler:
         # shape_obj is a Model (symbolic). Use its aliased expression
         if shape_obj is INPUT:
             return f"np.zeros_like(x, dtype=np.float64)"
-        raise "Dont know the shape"
+        raise ValueError(f"Cannot determine shape for {obj}")
 
     # ------------------------------------------------------------------ #
     #  4.  Emit python source string
@@ -318,8 +320,6 @@ class Compiler:
     # ------------------------------------------------------------------ #
     #  Helpers: hoist callables & numpy arrays
     # ------------------------------------------------------------------ #
-    _hoisted_consts: dict = {}
-    _hoisted_fns   : dict = {}
     def _hoist_fn(self, fn):
         for name, f in self._hoisted_fns.items():
             if f is fn:

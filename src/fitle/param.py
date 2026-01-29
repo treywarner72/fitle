@@ -143,7 +143,7 @@ class Param:
         if self.kind is self.input:
             return "INPUT"
         if self.kind is self.index:
-            if self.range == None:
+            if self.range is None:
                 return "INDEX"
             return f"{self._prefix()}{self.range}"
         if self.min == self.max:
@@ -157,7 +157,7 @@ class Param:
         if self.kind is self.input:
             return "INPUT"
         if self.kind is self.index:
-            if self.range == None:
+            if self.range is None:
                 return "INDEX"
             return f"{self._prefix()}{self.range}"
         if hasattr(self, "error"):
@@ -182,7 +182,7 @@ class Param:
                     self.start = 0.5 * (self.min + self.max)
                 self.value = self.start
             return self
-        """Rename (str) or set start value (numeric)."""
+        # Rename (str) or set start value (numeric).
         if isinstance(arg0, str):
             self.name = arg0
         elif isinstance(arg0, (int, float, np.number)):

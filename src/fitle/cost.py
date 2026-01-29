@@ -2,10 +2,6 @@ import numpy as np
 from .model import Model, const
 from .mnp import log, sum, where
 
-import numpy as np
-from .model import Model, const
-from .mnp import log, sum, where
-
 class Cost:
     """
     A unified class for generating and calculating various cost functions for model fitting.
@@ -58,7 +54,7 @@ class Cost:
         if data is not None and bins is not None:
             if x is not None or y is not None:
                 raise ValueError("Cannot provide both 'data' and 'x,y' for binned cost functions.")
-            centers, counts, edges = bin(data, bins, range)
+            centers, counts, edges = _bin(data, bins, range)
             widths = np.diff(edges)
             cost_instance = cls(centers, counts, widths)
         elif x is not None and y is not None:
@@ -70,10 +66,15 @@ class Cost:
                     # Use differences between adjacent centers
                     center_diffs = np.diff(x_arr)
                     # Assume first and last bins have same width as their neighbors
-                    widths = np.concatenate([[center_diffs[0]], center_diffs])
-                else:
-                    raise ValueError("Cannot infer bin widths from a single bin center. Please provide bin_widths explicitly.")
-            cost_instance = cls(x, y, bin_widths)
+                    widths = np.empty(len(x_arr))
+                    widths[0] = center_diffs[0]
+                    widths[-1] = center_diffs[-1]
+                    widths[1:-1] = (center_diffs[:-1] + center_diffs[1:]) / 2
+                        else:
+                            raise ValueError("Cannot infer bin widths from a single bin center. Please provide bin_widths explicitly.")
+                    else:
+                widhts = bin_widths
+            cost_instance = cls(x, y, widths)
         else:
             raise ValueError("For chi2, provide either 'data' and 'bins' (and optional 'range') or 'x', 'y', and 'bin_widths'.")
 
@@ -100,7 +101,7 @@ class Cost:
         if data is not None and bins is not None:
             if x is not None or y is not None:
                 raise ValueError("Cannot provide both 'data' and 'x,y' for binned cost functions.")
-            centers, counts, edges = bin(data, bins, range)
+            centers, counts, edges = _bin(data, bins, range)
             widths = np.diff(edges)
             cost_instance = cls(centers, counts, widths)
         elif x is not None and y is not None:
@@ -117,7 +118,7 @@ class Cost:
         )
         return cost_instance
 
-def bin(data, bins, range=None):
+def _bin(data, bins, range=None):
     """
     Bins the data.
 
