@@ -329,12 +329,14 @@ class Compiler:
         return name
 
 def new_compile(self):
-    current_hash = hash(self) # Hash depends on symbolic structure
+    current_hash = hash(self)  # Hash depends on symbolic structure
     if current_hash not in Model._compiled_cache:
-        print(f"Compiling model...")
+        # Evict oldest entry if cache is full (LRU)
+        while len(Model._compiled_cache) >= Model._cache_limit:
+            Model._compiled_cache.popitem(last=False)
         c = Compiler(self)
         Model._compiled_cache[current_hash] = c.compile()
-        self.code      = c.code
+        self.code = c.code
     return self
 
 Model.compile = new_compile

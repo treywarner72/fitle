@@ -88,12 +88,20 @@ class Cost:
         elif x is not None and y is not None:
             # Calculate bin widths from centers if not provided
             if bin_widths is None:
+                import warnings
                 x_arr = np.asarray(x)
                 # Calculate widths from spacing between centers
                 if len(x_arr) > 1:
-                    # Use differences between adjacent centers
                     center_diffs = np.diff(x_arr)
-                    # Assume first and last bins have same width as their neighbors
+                    # Check if bins are uniformly spaced
+                    if not np.allclose(center_diffs, center_diffs[0], rtol=1e-5):
+                        warnings.warn(
+                            "Inferring bin widths from non-uniform bin centers. "
+                            "This may be inaccurate. Consider providing bin_widths explicitly.",
+                            UserWarning,
+                            stacklevel=2
+                        )
+                    # Assume first/last bins have same width as neighbors
                     widths = np.empty(len(x_arr))
                     widths[0] = center_diffs[0]
                     widths[-1] = center_diffs[-1]

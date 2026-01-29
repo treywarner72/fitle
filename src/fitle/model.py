@@ -27,7 +27,7 @@ from numba.typed import Dict
 import typing
 from .param import Param, INPUT, INDEX
 from collections.abc import Iterable
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import operator
 import functools
 from typing import Any, Optional, Tuple
@@ -53,13 +53,24 @@ class Model:
         Acted on by other classes, for now just so that a cost function knows what its based on.
 
     """
-    _compiled_cache = {} # Class-level cache for compiled functions
+    _compiled_cache = OrderedDict()  # LRU cache for compiled functions
+    _cache_limit = 128
+
+    @classmethod
+    def clear_cache(cls):
+        """Clear the compiled function cache to free memory."""
+        cls._compiled_cache.clear()
+
+    @classmethod
+    def cache_info(cls):
+        """Return info about the compilation cache."""
+        return {"size": len(cls._compiled_cache), "limit": cls._cache_limit}
 
     @property
     def compiled(self) -> bool:
         """Return True if this Model has a compiled numba function in the cache."""
         return hash(self) in Model._compiled_cache
-    
+
     def __init__(self, fn, args):
         self.fn = fn
         self.args = args
@@ -586,8 +597,16 @@ bind_ops(Param)
 # Reduction
 
 class Reduction(Model):
+    _supported_ops = {operator.add: 'add'}  # Only add is supported by compiler
+
     def __init__(self, model, index_param, op=operator.add):
-        assert isinstance(index_param, Param), "must reduce over a Param"
+        if not isinstance(index_param, Param):
+            raise TypeError("Reduction index must be a Param")
+        if op not in Reduction._supported_ops:
+            raise ValueError(
+                f"Reduction only supports operator.add, got {op.__name__}.\n"
+                f"  For products, use: exp(Reduction(log(model), index))"
+            )
         self.model = model
         self.index = index_param
         self.op = op
@@ -777,6 +796,15 @@ def identity(val):
 def ensure_model(x):
     return x if isinstance(x, Model) else identity(x)
 
+def _is_scalar_equal(x, val):
+    """Check if x equals val, handling floats with tolerance."""
+    if isinstance(x, (Model, Param)):
+        return False
+    if isinstance(x, (int, float, np.number)):
+        return np.isclose(x, val, rtol=1e-14, atol=1e-14)
+    return x == val
+
+
 def simplify(m):
     if not isinstance(m, Model):
         return m
@@ -787,26 +815,26 @@ def simplify(m):
     fn = getattr(m.fn, '__name__', None)
     args = [simplify(arg) for arg in m.args]
 
-    def is_zero(x): return x == 0
-    def is_one(x): return x == 1
+    is_zero = lambda x: _is_scalar_equal(x, 0)
+    is_one = lambda x: _is_scalar_equal(x, 1)
 
     if fn in ('mul', 'rmul'):
         if any(is_zero(arg) for arg in args):
             return 0
-        args = [arg for arg in args if not is_one(arg)]
-        if len(args) == 0:
+        non_one = [arg for arg in args if not is_one(arg)]
+        if len(non_one) == 0:
             return 1
-        if len(args) == 1:
-            return ensure_model(args[0])
-        return Model(m.fn, args)
+        if len(non_one) == 1:
+            return ensure_model(non_one[0])
+        return Model(m.fn, non_one)
 
     if fn in ('add', 'radd'):
-        args = [arg for arg in args if not is_zero(arg)]
-        if len(args) == 0:
+        non_zero = [arg for arg in args if not is_zero(arg)]
+        if len(non_zero) == 0:
             return 0
-        if len(args) == 1:
-            return ensure_model(args[0])
-        return Model(m.fn, args)
+        if len(non_zero) == 1:
+            return ensure_model(non_zero[0])
+        return Model(m.fn, non_zero)
 
     if fn == 'sub':
         if is_zero(args[1]):

@@ -105,6 +105,7 @@ class Param:
         # THETA – store optimisation metadata
         self.min = min if min is not None else -np.inf
         self.max = max if max is not None else np.inf
+        self.range = None  # Only used by INDEX, but initialize for consistency
         self.start = None
         self.value = None
 

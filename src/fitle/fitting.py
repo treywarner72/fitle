@@ -84,7 +84,10 @@ class FitResult:
             raise ValueError("dof() not available for unbinned fits")
         return len(self.cost.x()) - len(self.values) 
 
-def fit(model, numba=True, grad=True, ncall=9999999, options={}):
+def fit(model, numba=True, grad=True, ncall=9999999, options=None):
+    if options is None:
+        options = {}
+
     if not isinstance(model, Model) or not callable(model):
         raise TypeError(
             f"Expected a Model instance, got {type(model).__name__}.\n"

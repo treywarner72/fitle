@@ -50,23 +50,6 @@ def crystalball(alpha, n, mu, sigma):
     # --- piecewise: Gaussian for t > -α, tail otherwise ---
     return where(t > -alpha, N * core, N * tail)
 
-"""def crystalball(alpha, n, xbar, sigma):
-    x = INPUT
-    n_over_alpha = n/alpha
-    pexp = exp(-0.5*alpha ** 2)
-    A = (n_over_alpha)**n*pexp
-    B =  n_over_alpha - alpha
-    C = n_over_alpha/(n-1)*pexp
-    D = np.sqrt(0.5*np.pi)*(1 + Model(lambda a: scipy.special.erf(a), [alpha/np.sqrt(2)]))
-    N = 1/(sigma*(C + D))
-
-    mask = (x - xbar)/sigma > -alpha
-
-    return where((x - xbar)/sigma > -alpha, 
-              N*exp(-0.5*((x-xbar)/sigma)**2),
-              N*A*(B - (x-xbar)/sigma)**-n
-             )"""
-
 
 def convolve(d_x, c, mass_mother, mu, sigma, idx=None):
     i = index(len(c)) if not idx else idx
