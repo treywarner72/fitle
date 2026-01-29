@@ -40,7 +40,8 @@ __all__ = [
     "Model",
     "indecise",
     "identity",
-    "vector"
+    "vector",
+    "formula",
 ]
 
 class Model:
@@ -1078,6 +1079,44 @@ def vector(*models):
         return np.array(args)
     stack_fn.__name__ = "vector"
     return Model(stack_fn, [ensure_model(m) for m in models])
+
+
+def formula(fn: Callable) -> Callable[..., Model]:
+    """Decorator to create a Model factory from a function.
+
+    The decorated function's first argument becomes INPUT (the independent
+    variable), and remaining arguments become Model parameters. Returns a
+    factory that takes the parameters and produces a Model.
+
+    Parameters
+    ----------
+    fn : Callable
+        A function where the first argument is the input data and
+        subsequent arguments are parameters.
+
+    Returns
+    -------
+    Callable[..., Model]
+        A factory function that takes parameters and returns a Model.
+
+    Examples
+    --------
+    >>> @formula
+    ... def line(x, a, b):
+    ...     return a * x + b
+    >>> model = line(Param('slope'), Param('intercept'))
+    >>> model(np.array([1, 2, 3]))
+
+    >>> @formula
+    ... def gaussian(x, mu, sigma):
+    ...     return np.exp(-0.5 * ((x - mu) / sigma)**2) / (sigma * np.sqrt(2*np.pi))
+    >>> g = gaussian(Param('mu')(0), Param.positive('sigma')(1))
+    """
+    @functools.wraps(fn)
+    def factory(*args):
+        return Model(fn, [INPUT, *args])
+    return factory
+
 
 def _is_scalar_equal(x, val):
     """Check if x equals val, handling floats with tolerance."""
