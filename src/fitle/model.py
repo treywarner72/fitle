@@ -177,13 +177,13 @@ class Model:
 
                 # --- otherwise: normal Model node ---
                 def _fn_key(f):
-                    # Prefer module + qualname for stable identity
-                    if hasattr(f, "__qualname__"):
-                        return (f.__module__, f.__qualname__)
+                    # Prefer __name__ since named() sets it explicitly
                     if hasattr(f, "__name__"):
                         if hasattr(f, "__module__"):
                             return (f.__module__, f.__name__)
-                        return (f.__name__)
+                        return f.__name__
+                    if hasattr(f, "__qualname__"):
+                        return (f.__module__, f.__qualname__)
                     return repr(f)
 
                 return ("model", _fn_key(fn), tuple(walk(arg) for arg in m.args))
@@ -277,6 +277,8 @@ class Model:
             return self.eval_py(x, index_map)
 
     def __call__(self, x=None):
+        if x is not None and not isinstance(x, np.ndarray):
+            x = np.asarray(x)
         if INPUT in self.free and x is None: raise Exception("Cannot __call__() with free X")
         if INPUT not in self.free and x is not None: raise Exception("Cannot __call__(x) without free X")
         if not self.free:
@@ -693,7 +695,7 @@ def _grad(self, wrt=None):
     if wrt is None:
         wrt = self.params
     if isinstance(wrt, Param):
-        return _grad_fn(self, wrt).simplify()
+        return ensure_model(_grad_fn(self, wrt)).simplify()
     if isinstance(wrt, (list, tuple)):
         def stack_fn(*args):
             return np.array(args)

@@ -1,5 +1,6 @@
 import numpy as np
 from .model import Model, const
+from .param import INPUT
 from .mnp import log, sum, where
 
 class Cost:
@@ -17,6 +18,14 @@ class Cost:
         bin_widths (const, optional): Constant representation of bin widths for binned data.
     """
     def __init__(self, x_data, y_data=None, bin_widths=None):
+        # Convert lists to numpy arrays for consistency
+        if not isinstance(x_data, np.ndarray):
+            x_data = np.asarray(x_data)
+        if y_data is not None and not isinstance(y_data, np.ndarray):
+            y_data = np.asarray(y_data)
+        if bin_widths is not None and not isinstance(bin_widths, np.ndarray):
+            bin_widths = np.asarray(bin_widths)
+
         self.x = const(x_data)
         self.y = const(y_data) if y_data is not None else None
         self.bin_widths = const(bin_widths) if bin_widths is not None else None
@@ -30,6 +39,9 @@ class Cost:
         raise NotImplementedError("This is a base Cost class. Use specific cost function generators like Cost.MSE, Cost.NLL, etc.")
 
     def __ror__(self, model):
+        # Ensure model broadcasts with data by adding INPUT dependency if missing
+        if INPUT not in model.free:
+            model = model + 0 * INPUT
         ret = self.fcn(model)
         ret.memory['base'] = model
         ret.memory['cost'] = self
@@ -70,10 +82,10 @@ class Cost:
                     widths[0] = center_diffs[0]
                     widths[-1] = center_diffs[-1]
                     widths[1:-1] = (center_diffs[:-1] + center_diffs[1:]) / 2
-                        else:
-                            raise ValueError("Cannot infer bin widths from a single bin center. Please provide bin_widths explicitly.")
-                    else:
-                widhts = bin_widths
+                else:
+                    raise ValueError("Cannot infer bin widths from a single bin center. Please provide bin_widths explicitly.")
+            else:
+                widths = bin_widths
             cost_instance = cls(x, y, widths)
         else:
             raise ValueError("For chi2, provide either 'data' and 'bins' (and optional 'range') or 'x', 'y', and 'bin_widths'.")

@@ -168,18 +168,22 @@ class Param:
     #   Mutating helpers
     # ------------------------------------------------------------------
     def __call__(self, arg0: str | np.number, arg1: np.number | None = None):
-        if arg1 is not None: 
+        if arg1 is not None:
             self.min, self.max = arg0, arg1
-            reset = self.start is None or self.start < self.min or self.start > self.max
-            if reset:
-                if self.min == -np.inf and self.max == np.inf:
-                    self.start = 0.0
-                elif self.min == -np.inf:
-                    self.start = float(self.max)
-                elif self.max == np.inf:
-                    self.start = float(self.min)
-                else:
-                    self.start = 0.5 * (self.min + self.max)
+            # Compute natural default for these bounds
+            if self.min == -np.inf and self.max == np.inf:
+                natural = 0.0
+            elif self.min == -np.inf:
+                natural = float(self.max)
+            elif self.max == np.inf:
+                natural = float(self.min)
+            else:
+                natural = 0.5 * (self.min + self.max)
+            # Reset if: outside bounds, or start is at old default (0) and new default differs
+            outside = self.start is None or self.start < self.min or self.start > self.max
+            at_old_default = (self.start == 0 and natural != 0)
+            if outside or at_old_default:
+                self.start = natural
                 self.value = self.start
             return self
         # Rename (str) or set start value (numeric).
