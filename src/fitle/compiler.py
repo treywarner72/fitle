@@ -1,3 +1,37 @@
+"""compiler.py
+=============
+Numba JIT compilation for Model expression trees.
+
+This module converts Model DAGs (directed acyclic graphs) into
+Numba-compiled functions for high-performance numerical evaluation.
+
+The compilation process has four stages:
+
+1. **DAG Construction** (``_build_dag``): Walk the Model tree and build
+   an intermediate representation (IR) of nodes, detecting common
+   subexpressions to avoid redundant computation.
+
+2. **Node Partitioning** (``_partition_nodes``): Separate IR nodes into
+   "global" nodes (no loop dependencies) and "loop" buckets (nodes that
+   depend on specific INDEX parameters).
+
+3. **Temporary Allocation** (``_allocate_temps``): Assign temporary variable
+   names to nodes that are used multiple times, enabling code reuse.
+
+4. **Source Emission** (``_emit_source``): Generate Python source code
+   that can be compiled by Numba's ``@njit`` decorator.
+
+The compiled function signature is::
+
+    compiled(x, indices, theta) -> result
+
+Where:
+- ``x``: Input data array (or None)
+- ``indices``: List of current index values for INDEX params
+- ``theta``: Array of parameter values in tree-walk order
+"""
+from __future__ import annotations
+
 import types, textwrap, operator
 import numpy as np
 from numba import njit
@@ -8,14 +42,26 @@ from .param import Param, INPUT
 # ---------------------------  Internal IR primitives  ---------------------------
 
 class _IRNode:
-    """
-    A single expression.
-    - `expr`    : RHS python string that can be pasted into generated code
-    - `deps`    : frozenset of Param.index objects this node depends on
-    - `users`   : number of times other IR nodes reference this node
-    - `name`    : temp lhs assigned during scheduling (None = inline literal)
-    - `is_red`  : None           -> plain expr
-                  (acc_name, op) -> reduction that updates `acc_name` with `op`
+    """A single expression node in the intermediate representation.
+
+    Attributes
+    ----------
+    expr : str
+        RHS Python string that can be pasted into generated code.
+    deps : frozenset[Param]
+        Set of INDEX parameters this node depends on.
+    users : int
+        Number of times other IR nodes reference this node.
+    name : str | None
+        Temporary variable name assigned during scheduling (None = inline).
+    is_red : tuple[str, str] | None
+        None for plain expressions, or (acc_name, op) for reductions.
+    is_leaf : bool
+        True if this is a leaf node (param, constant).
+    is_acc : bool
+        True if this is an accumulator node for a reduction.
+    model : Model | None
+        Reference to the original Model (for shape inference).
     """
     __slots__ = ("expr", "deps", "users", "name", "is_red", "is_leaf", "is_acc", "model")
     def __init__(self, expr, deps):
@@ -27,8 +73,21 @@ class _IRNode:
 
 
 class _LoopIR:
-    """Bucket of IR nodes that share exactly one `index` parameter."""
-    def __init__(self, index_param):
+    """Container for IR nodes that share exactly one INDEX parameter.
+
+    Groups all expressions that depend on a specific loop variable,
+    enabling generation of a single ``for`` loop in the output code.
+
+    Attributes
+    ----------
+    idx : Param
+        The INDEX parameter this loop iterates over.
+    body : list[_IRNode]
+        IR nodes executed inside the loop.
+    accums : list[tuple]
+        Accumulator specifications ``(lhs, node, op)``.
+    """
+    def __init__(self, index_param: Param):
         self.idx    = index_param
         self.body   = []              # list[_IRNode]   – executed in loop
         self.accums = []              # list[(lhs, node, op)]
@@ -38,12 +97,28 @@ class _LoopIR:
 # ---------------------------  Compiler class  ---------------------------
 
 class Compiler:
-    """
-    Second-generation compiler for Model trees.
-    Usage:
-        c = Compiler(model)
-        compiled_fn = c.compile()     # -> numba.njit'ed callable
-        model.code  = c.code          # generated python source for inspection
+    """Compiles Model expression trees to Numba JIT functions.
+
+    Converts a Model DAG into optimized Python source code that is
+    then compiled by Numba for fast numerical evaluation.
+
+    Parameters
+    ----------
+    root : Model
+        The root Model to compile.
+
+    Attributes
+    ----------
+    root : Model
+        The Model being compiled.
+    code : str
+        Generated Python source code (available after ``compile()``).
+
+    Examples
+    --------
+    >>> c = Compiler(model)
+    >>> compiled_fn = c.compile()  # Returns numba.njit callable
+    >>> print(c.code)  # Inspect generated source
     """
     # --------------------------------------------------------------------- #
     def __init__(self, root: Model):
@@ -60,6 +135,17 @@ class Compiler:
     #  PUBLIC ENTRY
     # ------------------------------------------------------------------ #
     def compile(self):
+        """Compile the Model and return a Numba JIT function.
+
+        Executes the four compilation stages: DAG construction, node
+        partitioning, temporary allocation, and source emission.
+
+        Returns
+        -------
+        callable
+            A Numba ``@njit`` compiled function with signature
+            ``compiled(x, indices, theta) -> result``.
+        """
         self._build_dag(self.root)
         self._partition_nodes()
         self._allocate_temps()
@@ -68,8 +154,19 @@ class Compiler:
         exec(source, ns)
         return njit(ns["compiled"])
 
-    def _idx_var(self, idx_param: Param):
-        """Return the unique loop-variable name for this index Param."""
+    def _idx_var(self, idx_param: Param) -> str:
+        """Return the unique loop-variable name for an INDEX Param.
+
+        Parameters
+        ----------
+        idx_param : Param
+            An INDEX parameter.
+
+        Returns
+        -------
+        str
+            A unique variable name like ``_i_12345678``.
+        """
         return self._idx_vars.setdefault(idx_param,
                                          f"_i_{id(idx_param)}")
 
@@ -77,7 +174,22 @@ class Compiler:
     #  1.  DAG construction  (common-sub-expression detection)
     # ------------------------------------------------------------------ #
     def _build_dag(self, model) -> _IRNode:
-        """DFS walk; returns the IR node representing `model`."""
+        """Build the IR DAG by walking the Model tree.
+
+        Performs depth-first traversal, creating IR nodes and detecting
+        common subexpressions. Each unique Model gets a single IR node,
+        with ``users`` tracking reference counts.
+
+        Parameters
+        ----------
+        model : Model | Param | Any
+            The expression node to process.
+
+        Returns
+        -------
+        _IRNode
+            The IR node representing this expression.
+        """
         if model in self._node_map:
             node = self._node_map[model]
             return node
@@ -178,11 +290,16 @@ class Compiler:
     # ------------------------------------------------------------------ #
     #  2.  Partition nodes into global vs loop buckets
     # ------------------------------------------------------------------ #
-    def _partition_nodes(self):
-        """
-        Walk every IR node once.  Those with no index-dependencies become
-        globals; those that depend on exactly one Param.index go to that
-        loop’s body.  Nested-index support is TBD.
+    def _partition_nodes(self) -> None:
+        """Partition IR nodes into global and loop-local buckets.
+
+        Nodes with no INDEX dependencies go to ``_globals``. Nodes that
+        depend on exactly one INDEX go to that loop's ``_LoopIR`` bucket.
+
+        Raises
+        ------
+        NotImplementedError
+            If a node depends on multiple INDEX parameters (nested loops).
         """
         # start fresh in case compile() is called twice
         prev_globals = list(self._globals)   # ← keep reduction bodies
@@ -209,7 +326,13 @@ class Compiler:
     # ------------------------------------------------------------------ #
     #  3.  Allocate temporaries (multi-use nodes get names)
     # ------------------------------------------------------------------ #
-    def _allocate_temps(self):
+    def _allocate_temps(self) -> None:
+        """Assign temporary variable names to multi-use nodes.
+
+        Nodes referenced more than once get a ``_tN`` name to avoid
+        redundant computation. Leaf nodes and accumulator holders
+        are skipped.
+        """
         t_counter = 0
         for node in self._globals + sum((b.body for b in self._loops.values()), []):
             if (node.users >= 2 and
@@ -225,11 +348,7 @@ class Compiler:
             rhs = rhs.replace(original, temp)
         return rhs
 
-    # ------------------------------------------------------------------ #
-    #  4.  Emit python source string
-    # ------------------------------------------------------------------ #
-
-    def _init_for_shape(self, obj, alias):
+    def _init_for_shape(self, obj, alias: dict) -> str:
         """
         Return the source-code string for an accumulator initialiser
         corresponding to `shape_obj`, where
@@ -250,7 +369,17 @@ class Compiler:
     # ------------------------------------------------------------------ #
     #  4.  Emit python source string
     # ------------------------------------------------------------------ #
-    def _emit_source(self):
+    def _emit_source(self) -> tuple[str, dict]:
+        """Generate Python source code for the compiled function.
+
+        Produces a function definition string and a namespace dict
+        containing hoisted constants and helper functions.
+
+        Returns
+        -------
+        tuple[str, dict]
+            (source_code, namespace) ready for ``exec()`` and ``@njit``.
+        """
         lines = ["def compiled(x, indices, theta):"]
         ns    = {"np": np}
         ns.update(self._hoisted_fns)
@@ -320,7 +449,22 @@ class Compiler:
     # ------------------------------------------------------------------ #
     #  Helpers: hoist callables & numpy arrays
     # ------------------------------------------------------------------ #
-    def _hoist_fn(self, fn):
+    def _hoist_fn(self, fn) -> str:
+        """Hoist a callable into the generated namespace.
+
+        Wraps the function with ``@njit`` and stores it in the namespace
+        under a unique name for use in generated code.
+
+        Parameters
+        ----------
+        fn : callable
+            The function to hoist.
+
+        Returns
+        -------
+        str
+            The namespace key (e.g., ``_fn_0``) to reference this function.
+        """
         for name, f in self._hoisted_fns.items():
             if f is fn:
                 return name
@@ -328,7 +472,23 @@ class Compiler:
         self._hoisted_fns[name] = njit(fn)
         return name
 
-def new_compile(self):
+def new_compile(self) -> Model:
+    """Compile this Model for fast evaluation using Numba.
+
+    Checks the global cache for an existing compiled function with
+    the same structure. If not found, compiles and caches the result.
+    Uses LRU eviction when the cache is full.
+
+    Returns
+    -------
+    Model
+        Returns self (for method chaining).
+
+    Notes
+    -----
+    After compilation, ``model.code`` contains the generated source
+    and ``model.compiled`` returns True.
+    """
     current_hash = hash(self)  # Hash depends on symbolic structure
     if current_hash not in Model._compiled_cache:
         # Evict oldest entry if cache is full (LRU)
@@ -338,5 +498,6 @@ def new_compile(self):
         Model._compiled_cache[current_hash] = c.compile()
         self.code = c.code
     return self
+
 
 Model.compile = new_compile

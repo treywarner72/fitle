@@ -1,4 +1,31 @@
+"""fitting.py
+============
+Model fitting using iminuit optimization.
+
+Provides the ``fit()`` function for optimizing Model parameters and
+the ``FitResult`` class for storing and visualizing fit results.
+
+The fitting workflow:
+
+1. Build a model with ``Param`` objects
+2. Combine with a cost function: ``model | Cost.NLL(data)``
+3. Call ``fit(cost_model)`` to optimize
+4. Access results via the returned ``FitResult``
+
+Example::
+
+    from fitle import Param, fit, Cost
+    from fitle.pdfs import gaussian
+
+    model = gaussian(Param("mu"), Param.positive("sigma"))
+    cost = model | Cost.NLL(data)
+    result = fit(cost)
+    print(result)  # Shows fitted parameters with errors
+"""
+from __future__ import annotations
+
 import numpy as np
+from numpy.typing import NDArray
 import iminuit
 import warnings
 from .model import Model, const
@@ -7,7 +34,50 @@ import matplotlib.pyplot as plt
 
 
 class FitResult:
-    def __init__(self, model, m):
+    """Container for fit results from ``fit()``.
+
+    Stores the fitted model, parameter values and errors, and provides
+    methods for visualization and analysis.
+
+    Attributes
+    ----------
+    model : Model
+        The cost model that was fitted.
+    minimizer : iminuit.Minuit
+        The underlying iminuit Minuit object.
+    fval : float
+        The minimum cost function value achieved.
+    success : bool
+        True if the fit converged successfully.
+    values : dict[str, float]
+        Fitted parameter values by name.
+    errors : dict[str, float]
+        Parameter uncertainties by name.
+    x : ndarray
+        The x-data (bin centers for binned fits).
+    y : ndarray | None
+        The y-data (counts for binned fits, None for unbinned).
+    predict : Model
+        The frozen model for predictions, scaled by bin widths.
+
+    Examples
+    --------
+    >>> result = fit(model | Cost.NLL(data))
+    >>> print(result)  # Shows all parameters
+    >>> result.plot_data()
+    >>> result.plot_fit()
+    """
+
+    def __init__(self, model: Model, m: iminuit.Minuit):
+        """Initialize a FitResult from a model and Minuit object.
+
+        Parameters
+        ----------
+        model : Model
+            The cost model that was minimized.
+        m : iminuit.Minuit
+            The Minuit minimizer after optimization.
+        """
         self.minimizer = m
         self.model = model
 
@@ -56,7 +126,12 @@ class FitResult:
             self.errors[name] = p.error
 
 
-    def _populate_params(self):
+    def _populate_params(self) -> None:
+        """Copy fitted values and errors from Minuit to Param objects.
+
+        Updates each Param's ``value`` and ``error`` attributes with
+        the results from the minimizer.
+        """
         for p, v, e in zip(self.model.params, self.minimizer.values, self.minimizer.errors):
             p.value = v
             p.error = e
@@ -69,22 +144,102 @@ class FitResult:
             ret += f"{name}: {p.value:.4g} ± {p.error:.2g}\n"
         return ret
     
-    def plot_data(self):
+    def plot_data(self) -> None:
+        """Plot the observed data with error bars.
+
+        Displays data points as markers with Poisson error bars
+        (sqrt(y)). Only available for binned fits.
+
+        Raises
+        ------
+        ValueError
+            If this is an unbinned fit (no y-data).
+        """
         if self.y is None:
             raise ValueError("plot_data() not available for unbinned fits")
         plt.errorbar(self.x, self.y, linestyle='', marker='.', color='black', yerr=np.sqrt(self.y))
-        
-    def plot_fit(self):
+
+    def plot_fit(self) -> None:
+        """Plot the fitted model prediction.
+
+        Displays the model evaluated at the bin centers, scaled by
+        bin widths. Only available for binned fits.
+
+        Raises
+        ------
+        ValueError
+            If this is an unbinned fit (no y-data).
+        """
         if self.y is None:
-            raise ValueError("plot_data() not available for unbinned fits")
+            raise ValueError("plot_fit() not available for unbinned fits")
         plt.plot(self.x, self.predict(self.x))
-    
-    def dof(self):
+
+    def dof(self) -> int:
+        """Calculate degrees of freedom.
+
+        Returns the number of data points minus the number of
+        fitted parameters. Only available for binned fits.
+
+        Returns
+        -------
+        int
+            Degrees of freedom (n_bins - n_parameters).
+
+        Raises
+        ------
+        ValueError
+            If this is an unbinned fit.
+        """
         if self.y is None:
             raise ValueError("dof() not available for unbinned fits")
         return len(self.cost.x()) - len(self.values) 
 
-def fit(model, numba=True, grad=True, ncall=9999999, options=None):
+def fit(
+    model: Model,
+    numba: bool = True,
+    grad: bool = True,
+    ncall: int = 9999999,
+    options: dict | None = None
+) -> FitResult:
+    """Fit a cost model by minimizing its parameters.
+
+    Uses iminuit's MIGRAD algorithm to find parameter values that
+    minimize the cost function.
+
+    Parameters
+    ----------
+    model : Model
+        A cost model created by piping a model to a Cost function,
+        e.g., ``gaussian() | Cost.NLL(data)``.
+    numba : bool, default True
+        If True, compile the model with Numba for faster evaluation.
+        Falls back to Python if compilation fails.
+    grad : bool, default True
+        If True, compute analytical gradients for the optimizer.
+        Falls back to numerical gradients if symbolic differentiation
+        fails.
+    ncall : int, default 9999999
+        Maximum number of function calls for MIGRAD.
+    options : dict, optional
+        Additional keyword arguments passed to ``iminuit.Minuit()``.
+
+    Returns
+    -------
+    FitResult
+        Object containing fitted parameters, errors, and plotting methods.
+
+    Raises
+    ------
+    TypeError
+        If ``model`` is not a callable Model instance.
+
+    Examples
+    --------
+    >>> model = gaussian(Param("mu"), Param.positive("sigma"))
+    >>> cost = model | Cost.NLL(data)
+    >>> result = fit(cost)
+    >>> print(result.values)  # {'mu': 5.2, 'sigma': 1.1}
+    """
     if options is None:
         options = {}
 

@@ -6,7 +6,7 @@ Representation of models in the library, also the main user interface
 Define a model building on built in types or by using arithmetic with Params. For instance:
 
 linear_model = Param('a') * Param.INPUT + Param('b')
-gaussian_model = gaussian(Param('mu')(5,10)) # a gaussian model with a mu between 5 and 10 and a default sigma 
+gaussian_model = gaussian(Param('mu')(5,10)) # a gaussian model with a mu between 5 and 10 and a default sigma
 
 We can also add models together:
 
@@ -20,17 +20,19 @@ You can also compile it with composite_model.compile(), after which any model wi
 
 
 """
+from __future__ import annotations
 
 import numpy as np
 from numba import njit, types
 from numba.typed import Dict
 import typing
 from .param import Param, INPUT, INDEX
-from collections.abc import Iterable
+from collections.abc import Iterable, Callable
 from collections import defaultdict, OrderedDict
 import operator
 import functools
-from typing import Any, Optional, Tuple
+from typing import Any
+from numpy.typing import NDArray
 import copy as _copy
 
 
@@ -264,7 +266,24 @@ class Model:
 
         return walk(self, other)
 
-    def eval_py(self, x, index_map):
+    def eval_py(self, x: NDArray[np.floating] | None, index_map: dict[Param, int]) -> Any:
+        """Evaluate the model using pure Python (no Numba).
+
+        Recursively evaluates the expression tree by calling each
+        function node with its evaluated arguments.
+
+        Parameters
+        ----------
+        x : ndarray | None
+            Input data array, or None if the model has no INPUT dependency.
+        index_map : dict[Param, int]
+            Mapping from INDEX parameters to their current integer values.
+
+        Returns
+        -------
+        Any
+            The evaluated result (typically ndarray or scalar).
+        """
         import warnings
 
         # Collect warnings with their model context
@@ -317,7 +336,32 @@ class Model:
 
         return result
 
-    def eval(self, x, index_map, numba=False):
+    def eval(self, x: NDArray[np.floating] | None, index_map: dict[Param, int], numba: bool = False) -> Any:
+        """Evaluate the model, using compiled code if available.
+
+        Checks the compilation cache for a Numba-compiled version of this
+        model's structure. If found, uses the fast compiled path; otherwise
+        falls back to Python evaluation.
+
+        Parameters
+        ----------
+        x : ndarray | None
+            Input data array, or None if the model has no INPUT dependency.
+        index_map : dict[Param, int]
+            Mapping from INDEX parameters to their current integer values.
+        numba : bool, default False
+            If True, raises an error when no compiled function is available.
+
+        Returns
+        -------
+        Any
+            The evaluated result (typically ndarray or scalar).
+
+        Raises
+        ------
+        AttributeError
+            If ``numba=True`` and no compiled function exists in cache.
+        """
         if not self.params:
             theta = None
         else:
@@ -334,7 +378,35 @@ class Model:
                 raise AttributeError("No compiled function in cache")
             return self.eval_py(x, index_map)
 
-    def __call__(self, x=None):
+    def __call__(self, x: NDArray[np.floating] | Param | Model | None = None) -> Any:
+        """Evaluate the model or perform substitution.
+
+        The behavior depends on the argument type:
+        - If ``x`` is a Param or Model, performs substitution (same as ``%``).
+        - If ``x`` is array-like, evaluates the model with that input data.
+        - If ``x`` is None, evaluates a model with no INPUT dependency.
+
+        Parameters
+        ----------
+        x : ndarray | Param | Model | None, optional
+            Input data for evaluation, or a Param/Model for substitution.
+
+        Returns
+        -------
+        Any
+            Evaluation result (ndarray/scalar) or substituted Model.
+
+        Raises
+        ------
+        TypeError
+            If the model requires INPUT but none provided, or vice versa.
+
+        Examples
+        --------
+        >>> model = Param("a") * INPUT
+        >>> model(np.array([1, 2, 3]))  # Evaluate
+        >>> model(other_param)  # Substitute (same as model % other_param)
+        """
         # If x is a Param/Model, treat as substitution, not evaluation
         if isinstance(x, (Param, Model)):
             return self % x
@@ -358,9 +430,29 @@ class Model:
             return self.eval(x, {})
         else:
             return self % x
-# ops
+    def __getitem__(self, map: dict | int) -> Any:
+        """Access model values by index or evaluate with index map.
 
-    def __getitem__(self, map):
+        Provides convenient syntax for working with INDEX parameters
+        or evaluating the model at specific index values.
+
+        Parameters
+        ----------
+        map : dict | int
+            Either a dictionary mapping INDEX params to values, or an
+            integer value for the default INDEX parameter.
+
+        Returns
+        -------
+        Any
+            If model has INPUT: returns a substituted Model.
+            Otherwise: returns the evaluated result at the given index.
+
+        Examples
+        --------
+        >>> model[0]  # Evaluate/substitute at index 0
+        >>> model[{my_index: 5}]  # Use specific index parameter
+        """
         if INPUT in self.free:
             if not isinstance(map, dict):
                 return self % {INDEX: map}
@@ -369,17 +461,34 @@ class Model:
                 return self.eval(None, {INDEX: map})
         return self.eval(None, map)
 
-    def copy_with_args(self, args):
+    def copy_with_args(self, args: list) -> Model:
+        """Create a shallow copy of this Model with new arguments.
+
+        Parameters
+        ----------
+        args : list
+            New argument list to use instead of the current args.
+
+        Returns
+        -------
+        Model
+            A new Model with the same function but different arguments.
+        """
         return type(self)(self.fn, args)
 
-    def copy(self):
-        """
-        Copy of the model expression tree.
+    def copy(self) -> Model:
+        """Create a deep copy of the model expression tree.
 
-        - All Model / Reduction nodes are recreated
-        - THETA Params are cloned into new Param instances
-        - INPUT / INDEX Params are shared (same singletons)
-        - Lists/tuples inside args are recursively copied
+        Creates a new Model with:
+        - All Model/Reduction nodes recreated as new instances
+        - THETA Params cloned into new Param instances (preserving values)
+        - INPUT/INDEX Params shared (same singletons)
+        - Lists/tuples inside args recursively copied
+
+        Returns
+        -------
+        Model
+            A deep copy of this model with independent THETA parameters.
         """
         model_memo = {}
         param_memo = {}
@@ -420,7 +529,30 @@ class Model:
         return walk(self)
 
 
-    def __mod__(self, subs):
+    def __mod__(self, subs: dict | Any) -> Model:
+        """Substitute parameters or sub-expressions in this model.
+
+        The ``%`` operator performs symbolic substitution, replacing
+        occurrences of specified parameters or models with new values.
+
+        Parameters
+        ----------
+        subs : dict | Any
+            Either a dictionary mapping old nodes to new values, or a
+            single value to substitute for INPUT.
+
+        Returns
+        -------
+        Model
+            A new Model with substitutions applied.
+
+        Examples
+        --------
+        >>> model = Param("a") * INPUT + Param("b")
+        >>> model % 5  # Substitute INPUT with 5
+        >>> model % {INPUT: x_data}  # Same as above
+        >>> model % {some_param: 2.0}  # Fix a parameter to a constant
+        """
         if not isinstance(subs, dict):
             subs = {INPUT: subs}
 
@@ -457,7 +589,24 @@ class Model:
     def __str__(self):
         return self._format()
 
-    def _format(self, parent_prec=0, side=None):
+    def _format(self, parent_prec: int = 0, side: str | None = None) -> str:
+        """Format the model as a human-readable expression string.
+
+        Recursively formats the expression tree with proper operator
+        precedence and parenthesization.
+
+        Parameters
+        ----------
+        parent_prec : int, default 0
+            Precedence level of the parent expression (for parentheses).
+        side : str | None, default None
+            Which side of a binary op this is ('left' or 'right').
+
+        Returns
+        -------
+        str
+            A formatted string representation of the model.
+        """
         if isinstance(self, Reduction):
             inner = self.model._format() if isinstance(self.model, Model) else str(self.model)
             return f"{self.op.__name__}_reduce({inner}, index={self.index})"
@@ -557,7 +706,22 @@ class Model:
         arg_strs = [arg._format() if isinstance(arg, Model) else str(arg) for arg in self.args]
         return f"{fn_name}({', '.join(arg_strs)})"
 
-    def freeze(self):
+    def freeze(self) -> Model:
+        """Replace all THETA parameters with their current values.
+
+        Creates a new Model where every optimizable parameter is
+        substituted with its current numeric value, effectively
+        "freezing" the model at its current parameter state.
+
+        Returns
+        -------
+        Model
+            A new Model with all parameters replaced by constants.
+
+        Examples
+        --------
+        >>> fitted_model.freeze()  # Lock in fitted parameter values
+        """
         return self % {p : p.value for p in self.params}
 
 # Operations
@@ -603,9 +767,40 @@ bind_ops(Param)
 # Reduction
 
 class Reduction(Model):
+    """A Model that reduces over an INDEX parameter using an operator.
+
+    Represents a summation (or other reduction) over a loop variable,
+    e.g., ``sum_{i=0}^{n} f(i)``. Currently only ``operator.add`` is
+    supported for Numba compilation.
+
+    Parameters
+    ----------
+    model : Model
+        The expression to reduce over.
+    index_param : Param
+        An INDEX parameter with a ``range`` attribute defining the
+        iteration bounds.
+    op : callable, default operator.add
+        The reduction operator. Must be ``operator.add``.
+
+    Attributes
+    ----------
+    model : Model
+        The inner expression being reduced.
+    index : Param
+        The INDEX parameter controlling the loop.
+    op : callable
+        The reduction operator.
+
+    Examples
+    --------
+    >>> i = index(10)  # Loop from 0 to 9
+    >>> weights = indecise(const([...]), i)
+    >>> total = Reduction(weights * some_model, i)  # Sum over i
+    """
     _supported_ops = {operator.add: 'add'}  # Only add is supported by compiler
 
-    def __init__(self, model, index_param, op=operator.add):
+    def __init__(self, model: Model, index_param: Param, op: Callable = operator.add):
         if not isinstance(index_param, Param):
             raise TypeError("Reduction index must be a Param")
         if op not in Reduction._supported_ops:
@@ -644,7 +839,30 @@ class Reduction(Model):
 
 # Useful methods
 
-def const(val):
+def const(val: Any) -> Model:
+    """Wrap a constant value as a Model node.
+
+    Creates a Model that always returns the given constant value
+    when evaluated. Useful for embedding literal values in
+    expression trees.
+
+    Parameters
+    ----------
+    val : Any
+        The constant value to wrap (scalar, array, etc.).
+
+    Returns
+    -------
+    Model
+        A Model node that evaluates to the constant value.
+
+    Examples
+    --------
+    >>> c = const(5.0)
+    >>> c()
+    5.0
+    >>> arr = const(np.array([1, 2, 3]))
+    """
     # Convert lists/tuples to arrays for consistency and hashability
     if isinstance(val, (list, tuple)):
         val = np.asarray(val)
@@ -652,16 +870,30 @@ def const(val):
     f.__name__ = f"const"
     return Model(f, [])
 
-def indecise(obj, index = INDEX):
-    #if isinstance(obj, (list, tuple)):
-    #    entries = [e if isinstance(e, (Model, Param)) else const(e) for e in obj]
-    #    fn = lambda entries, i: entries[int(i)]
-    #    fn.__name__ = 'indecise'
-    #    return Model(fn, [entries, index])
-    #else:
-    #    fn = lambda arr, i: arr[int(i)]
-    #    fn.__name__ = 'indecise'
-    #    return Model(fn, [obj, index])
+def indecise(obj: Any, index: Param = INDEX) -> Model:
+    """Create a Model that selects from an array by index.
+
+    Wraps an array (or constant) so that it can be indexed by
+    an INDEX parameter, enabling iteration over array elements
+    in reductions.
+
+    Parameters
+    ----------
+    obj : Any
+        The array or constant to index into.
+    index : Param, default INDEX
+        The INDEX parameter to use for selection.
+
+    Returns
+    -------
+    Model
+        A Model that evaluates to ``obj[index]``.
+
+    Examples
+    --------
+    >>> weights = indecise(const([0.3, 0.5, 0.2]), i)
+    >>> Reduction(weights * some_model, i)  # Sum weighted models
+    """
     if not isinstance(obj, typing.Hashable):
         obj = const(obj)
     fn = lambda arr, i: arr[int(i)]
@@ -675,7 +907,30 @@ def indecise(obj, index = INDEX):
 def _zero(): return 0
 def _one(): return 1
 
-def _grad_fn(model, wrt):
+def _grad_fn(model: Model | Param | Any, wrt: Param) -> Model | int:
+    """Compute the symbolic gradient of a model w.r.t. a parameter.
+
+    Recursively applies differentiation rules to build a new Model
+    representing the derivative. Supports standard arithmetic operations,
+    exp, log, sqrt, sum, where, and indecise.
+
+    Parameters
+    ----------
+    model : Model | Param | Any
+        The expression to differentiate.
+    wrt : Param
+        The parameter to differentiate with respect to.
+
+    Returns
+    -------
+    Model | int
+        The derivative expression (0 or 1 for simple cases).
+
+    Raises
+    ------
+    ValueError
+        If an unsupported operation is encountered.
+    """
     if isinstance(model, Param):
         return _one() if model is wrt else _zero()
 
@@ -791,9 +1046,27 @@ def _grad(self, wrt=None):
 
 Model.grad = _grad
 
-def iden(x): return x
+def iden(x):
+    """Identity function, returns input unchanged."""
+    return x
 
-def identity(val):
+
+def identity(val: Any) -> Model:
+    """Wrap a value in an identity Model node.
+
+    Creates a Model that simply passes through its argument unchanged.
+    Useful for marking component boundaries in composite models.
+
+    Parameters
+    ----------
+    val : Any
+        The value or Model to wrap.
+
+    Returns
+    -------
+    Model
+        A Model that evaluates to the input value.
+    """
     return Model(iden, [val])
 
 def ensure_model(x):
@@ -815,7 +1088,26 @@ def _is_scalar_equal(x, val):
     return x == val
 
 
-def simplify(m):
+def simplify(m: Model | Any) -> Model | Any:
+    """Simplify a model by applying algebraic identities.
+
+    Performs constant folding and removes redundant operations:
+    - ``x * 0 -> 0``, ``x * 1 -> x``
+    - ``x + 0 -> x``
+    - ``x - 0 -> x``, ``0 - x -> -x``
+    - ``x / 1 -> x``, ``0 / x -> 0``
+    - ``x ** 0 -> 1``, ``x ** 1 -> x``
+
+    Parameters
+    ----------
+    m : Model | Any
+        The expression to simplify.
+
+    Returns
+    -------
+    Model | Any
+        A simplified expression (may be a constant if fully reduced).
+    """
     if not isinstance(m, Model):
         return m
 
@@ -876,7 +1168,22 @@ def simplify(m):
 Model.simplify = simplify
 
 
-def shape(obj):
+def shape(obj: Any) -> tuple | Param:
+    """Infer the output shape of a model or value.
+
+    Recursively determines what shape the expression will produce
+    when evaluated.
+
+    Parameters
+    ----------
+    obj : Any
+        A Model, Param, array, or scalar.
+
+    Returns
+    -------
+    tuple | Param
+        The shape as a tuple, or INPUT if the shape depends on input data.
+    """
     if isinstance(obj, (int, float, np.number)):
         return ()
 

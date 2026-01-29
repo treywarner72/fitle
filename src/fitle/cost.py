@@ -1,4 +1,36 @@
+"""cost.py
+=========
+Cost function factory for model fitting.
+
+Provides the ``Cost`` class which generates various cost functions
+(loss functions) that can be combined with Models using the pipe
+operator (``|``).
+
+Supported cost functions:
+
+- **MSE**: Mean Squared Error for regression
+- **NLL / unbinnedNLL**: Unbinned Negative Log-Likelihood for PDFs
+- **chi2**: Chi-squared for binned histogram fits
+- **binnedNLL**: Binned Negative Log-Likelihood for histograms
+
+Example usage::
+
+    from fitle import Param, Cost
+    from fitle.pdfs import gaussian
+
+    # Create a model
+    model = gaussian(Param("mu"), Param.positive("sigma"))
+
+    # Pipe to a cost function
+    cost_model = model | Cost.NLL(data)
+
+    # Fit
+    result = fit(cost_model)
+"""
+from __future__ import annotations
+
 import numpy as np
+from numpy.typing import NDArray
 from .model import Model, const
 from .param import INPUT
 from .mnp import log, sum, where
@@ -54,7 +86,22 @@ class Cost:
         """
         raise NotImplementedError("This is a base Cost class. Use specific cost function generators like Cost.MSE, Cost.NLL, etc.")
 
-    def __ror__(self, model):
+    def __ror__(self, model: Model) -> Model:
+        """Combine a Model with this cost function using the pipe operator.
+
+        When using ``model | cost``, this method is called to create
+        a new Model representing the cost function applied to the model.
+
+        Parameters
+        ----------
+        model : Model
+            The model (typically a PDF) to compute cost for.
+
+        Returns
+        -------
+        Model
+            A new Model that computes the cost when evaluated.
+        """
         # Ensure model broadcasts with data by adding INPUT dependency if missing
         if INPUT not in model.free:
             model = model + 0 * INPUT
@@ -64,21 +111,91 @@ class Cost:
         return ret
 
     @classmethod
-    def MSE(cls, x, y):
+    def MSE(cls, x: NDArray | list, y: NDArray | list) -> Cost:
+        """Create a Mean Squared Error cost function.
+
+        Computes ``sum((y - model(x))^2)``.
+
+        Parameters
+        ----------
+        x : array_like
+            Independent variable data (input values).
+        y : array_like
+            Dependent variable data (observed values).
+
+        Returns
+        -------
+        Cost
+            A Cost instance configured for MSE.
+        """
         cost_instance = cls(x, y)
         cost_instance.fcn = lambda model: sum((cost_instance.y - model % cost_instance.x)**2)
         return cost_instance
 
     @classmethod
-    def unbinnedNLL(cls, x):
+    def unbinnedNLL(cls, x: NDArray | list) -> Cost:
+        """Create an unbinned Negative Log-Likelihood cost function.
+
+        Computes ``sum(-log(model(x)))``, suitable for fitting
+        probability density functions to unbinned data.
+
+        Parameters
+        ----------
+        x : array_like
+            Observed data points (unbinned).
+
+        Returns
+        -------
+        Cost
+            A Cost instance configured for unbinned NLL.
+        """
         cost_instance = cls(x)
         cost_instance.fcn = lambda model: sum(-log(model % cost_instance.x))
         return cost_instance
-        
-    NLL = unbinnedNLL
+
+    NLL = unbinnedNLL  # Alias for convenience
 
     @classmethod
-    def chi2(cls, data=None, bins=None, range=None, x=None, y=None, bin_widths=None, zero_method='error'):
+    def chi2(
+        cls,
+        data: NDArray | list | None = None,
+        bins: int | NDArray | None = None,
+        range: tuple[float, float] | None = None,
+        x: NDArray | list | None = None,
+        y: NDArray | list | None = None,
+        bin_widths: NDArray | list | None = None,
+        zero_method: str = 'error'
+    ) -> Cost:
+        """Create a chi-squared cost function for binned data.
+
+        Computes ``sum((y - model(x) * bin_widths)^2 / y)``.
+
+        Can be initialized either from raw data (which gets binned) or
+        from pre-binned histogram data.
+
+        Parameters
+        ----------
+        data : array_like, optional
+            Raw data to bin (use with ``bins``).
+        bins : int or array_like, optional
+            Number of bins or bin edges (use with ``data``).
+        range : tuple[float, float], optional
+            Histogram range (use with ``data`` and ``bins``).
+        x : array_like, optional
+            Bin centers (use with ``y``).
+        y : array_like, optional
+            Observed counts per bin (use with ``x``).
+        bin_widths : array_like, optional
+            Width of each bin (required if using ``x`` and ``y``).
+        zero_method : str, default 'error'
+            How to handle zero counts: 'error' raises, 'absolute' uses
+            absolute residuals for zero bins.
+
+        Returns
+        -------
+        Cost
+            A Cost instance configured for chi-squared.
+        """
         if data is not None and bins is not None:
             if x is not None or y is not None:
                 raise ValueError("Cannot provide both 'data' and 'x,y' for binned cost functions.")
@@ -133,7 +250,43 @@ class Cost:
         return cost_instance
 
     @classmethod
-    def binnedNLL(cls, data=None, bins=None, range=None, x=None, y=None, bin_widths=None):
+    def binnedNLL(
+        cls,
+        data: NDArray | list | None = None,
+        bins: int | NDArray | None = None,
+        range: tuple[float, float] | None = None,
+        x: NDArray | list | None = None,
+        y: NDArray | list | None = None,
+        bin_widths: NDArray | list | None = None
+    ) -> Cost:
+        """Create a binned Negative Log-Likelihood cost function.
+
+        Computes ``2 * sum(model(x) * bin_widths - y * log(model(x) * bin_widths))``,
+        which is the Poisson likelihood for binned data (up to a constant).
+
+        Can be initialized either from raw data (which gets binned) or
+        from pre-binned histogram data.
+
+        Parameters
+        ----------
+        data : array_like, optional
+            Raw data to bin (use with ``bins``).
+        bins : int or array_like, optional
+            Number of bins or bin edges (use with ``data``).
+        range : tuple[float, float], optional
+            Histogram range (use with ``data`` and ``bins``).
+        x : array_like, optional
+            Bin centers (use with ``y``).
+        y : array_like, optional
+            Observed counts per bin (use with ``x``).
+        bin_widths : array_like, optional
+            Width of each bin (required if using ``x`` and ``y``).
+
+        Returns
+        -------
+        Cost
+            A Cost instance configured for binned NLL.
+        """
         if data is not None and bins is not None:
             if x is not None or y is not None:
                 raise ValueError("Cannot provide both 'data' and 'x,y' for binned cost functions.")
@@ -154,23 +307,30 @@ class Cost:
         )
         return cost_instance
 
-def _bin(data, bins, range=None):
-    """
-    Bins the data.
+def _bin(
+    data: NDArray | list,
+    bins: int | NDArray,
+    range: tuple[float, float] | None = None
+) -> tuple[NDArray, NDArray, NDArray]:
+    """Bin data into a histogram.
 
-    Args:
-        data (array_like): The input data to be binned.
-        bins (int or sequence of scalars): If bins is an int, it defines the number of
-                                           equal-width bins in the given range. If bins
-                                           is a sequence, it defines the bin edges.
-        range (tuple, optional): The lower and upper range of the bins.
-                                      If not provided, the range is (data.min(), data.max()).
+    Parameters
+    ----------
+    data : array_like
+        The input data to be binned.
+    bins : int or array_like
+        If int, the number of equal-width bins. If array, the bin edges.
+    range : tuple[float, float], optional
+        The (min, max) range for binning. Defaults to data range.
 
-    Returns:
-        tuple: A tuple containing:
-               - centers (ndarray): The centers of the bins.
-               - counts (ndarray): The number of data points in each bin.
-               - edges (ndarray): The bin edges.
+    Returns
+    -------
+    centers : ndarray
+        The center of each bin.
+    counts : ndarray
+        The number of data points in each bin (as float64).
+    edges : ndarray
+        The bin edges.
     """
     counts, edges = np.histogram(data, bins=bins, range=range)
     centers = 0.5 * (edges[1:] + edges[:-1])

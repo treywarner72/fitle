@@ -164,6 +164,13 @@ class Param:
     #   Printable helpers
     # ------------------------------------------------------------------
     def _prefix(self) -> str:
+        """Return the name prefix for string representations.
+
+        Returns
+        -------
+        str
+            ``"name="`` if a name is set, otherwise ``""``.
+        """
         return f"{self.name}=" if self.name else ""
 
     def __repr__(self) -> str:
@@ -194,7 +201,7 @@ class Param:
     # ------------------------------------------------------------------
     #   Mutating helpers
     # ------------------------------------------------------------------
-    def __call__(self, arg0: str | np.number, arg1: np.number | None = None):
+    def __call__(self, arg0: str | np.number, arg1: np.number | None = None) -> Param:
         if arg1 is not None:
             self.min, self.max = arg0, arg1
             # Compute natural default for these bounds
@@ -232,13 +239,40 @@ class Param:
 # -----------------------------------------------------------------------------
 
 class ParamFactory:
-    """Callable/sliceable object that returns pre‑configured ``Param``s."""
+    """Callable/sliceable object that returns pre‑configured ``Param``s.
+
+    Parameters
+    ----------
+    default_limits : tuple[float, float]
+        The (min, max) bounds to apply by default.
+    default_start : float
+        The default starting value for created parameters.
+
+    Examples
+    --------
+    >>> positive = ParamFactory((1e-6, np.inf), 1)
+    >>> sigma = positive("sigma")  # Creates a positive parameter named "sigma"
+    """
 
     def __init__(self, default_limits: Tuple[float, float], default_start: float):
         self._limits = default_limits
         self._start = default_start
 
-    def __call__(self, arg0: str | np.number | None = None, arg1: np.number | None = None):
+    def __call__(self, arg0: str | np.number | None = None, arg1: np.number | None = None) -> Param:
+        """Create a new Param with preconfigured bounds.
+
+        Parameters
+        ----------
+        arg0 : str | float | None, optional
+            If str, sets the parameter name. If numeric, sets the start value.
+        arg1 : float | None, optional
+            If provided with arg0, sets bounds as (arg0, arg1).
+
+        Returns
+        -------
+        Param
+            A new parameter instance with the factory's default bounds applied.
+        """
         p = Param()(*self._limits)(self._start)
         if arg0 is not None:
             if arg1 is not None:
