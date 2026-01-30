@@ -92,8 +92,10 @@ class FitResult:
         if self.cost.bin_widths is not None:
             bw = self.cost.bin_widths()
             self.bin_widths = bw if bw is not None else 1
+            self.bin_width = np.mean(self.bin_widths)
         else:
             self.bin_widths = 1
+            self.bin_width = 1
 
         if "base" not in model.memory:
             raise ValueError(
@@ -283,12 +285,13 @@ def fit(
             numba = False
 
     params = model.params
+    use_numba = numba  # Capture for closures
 
     def loss_fn(*theta):
         for p, v in zip(params, theta):
             p.value = v
         try:
-            return model.eval(None, {})
+            return model.eval(None, {}, numba=use_numba)
         except Exception as e:
             param_info = ", ".join(f"{p.name}={v:.4g}" for p, v in zip(params, theta))
             raise RuntimeError(
@@ -302,7 +305,7 @@ def fit(
         for p, v in zip(params, theta):
             p.value = v
         try:
-            return grad_model.eval(None, {})
+            return grad_model.eval(None, {}, numba=use_numba)
         except Exception as e:
             param_info = ", ".join(f"{p.name}={v:.4g}" for p, v in zip(params, theta))
             raise RuntimeError(
