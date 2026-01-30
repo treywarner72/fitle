@@ -33,7 +33,6 @@ import numpy as np
 from numpy.typing import NDArray
 from .model import Model, const
 from .param import INPUT
-from .mnp import log, sum, where
 
 class Cost:
     """
@@ -114,7 +113,7 @@ class Cost:
     def MSE(cls, x: NDArray | list, y: NDArray | list) -> Cost:
         """Create a Mean Squared Error cost function.
 
-        Computes ``sum((y - model(x))^2)``.
+        Computes ``np.sum((y - model(x))^2)``.
 
         Parameters
         ----------
@@ -129,14 +128,14 @@ class Cost:
             A Cost instance configured for MSE.
         """
         cost_instance = cls(x, y)
-        cost_instance.fcn = lambda model: sum((cost_instance.y - model % cost_instance.x)**2)
+        cost_instance.fcn = lambda model: np.sum((cost_instance.y - model % cost_instance.x)**2)
         return cost_instance
 
     @classmethod
     def unbinnedNLL(cls, x: NDArray | list) -> Cost:
         """Create an unbinned Negative Log-Likelihood cost function.
 
-        Computes ``sum(-log(model(x)))``, suitable for fitting
+        Computes ``np.sum(-np.log(model(x)))``, suitable for fitting
         probability density functions to unbinned data.
 
         Parameters
@@ -150,7 +149,7 @@ class Cost:
             A Cost instance configured for unbinned NLL.
         """
         cost_instance = cls(x)
-        cost_instance.fcn = lambda model: sum(-log(model % cost_instance.x))
+        cost_instance.fcn = lambda model: np.sum(-np.log(model % cost_instance.x))
         return cost_instance
 
     NLL = unbinnedNLL  # Alias for convenience
@@ -168,7 +167,7 @@ class Cost:
     ) -> Cost:
         """Create a chi-squared cost function for binned data.
 
-        Computes ``sum((y - model(x) * bin_widths)^2 / y)``.
+        Computes ``np.sum((y - model(x) * bin_widths)^2 / y)``.
 
         Can be initialized either from raw data (which gets binned) or
         from pre-binned histogram data.
@@ -234,9 +233,9 @@ class Cost:
         if np.any(cost_instance.y() == 0):
             if zero_method == 'absolute':
                 condition = cost_instance.y > 0
-                y_star = where(cost_instance.y>0, cost_instance.y, 1)
+                y_star = np.where(cost_instance.y>0, cost_instance.y, 1)
                 # Scale model predictions by bin width
-                cost_instance.fcn = lambda model: sum(
+                cost_instance.fcn = lambda model: np.sum(
                     ((cost_instance.y - (model % cost_instance.x) * cost_instance.bin_widths) ** 2) / y_star
                 )
                 return cost_instance
@@ -261,7 +260,7 @@ class Cost:
     ) -> Cost:
         """Create a binned Negative Log-Likelihood cost function.
 
-        Computes ``2 * sum(model(x) * bin_widths - y * log(model(x) * bin_widths))``,
+        Computes ``2 * np.sum(model(x) * bin_widths - y * np.log(model(x) * bin_widths))``,
         which is the Poisson likelihood for binned data (up to a constant).
 
         Can be initialized either from raw data (which gets binned) or
@@ -301,9 +300,9 @@ class Cost:
             raise ValueError("For binned_nll, provide either 'data' and 'bins' (and optional 'range') or 'x', 'y', and 'bin_widths'.")
 
         # Scale model predictions by bin width
-        cost_instance.fcn = lambda model: 2 * sum(
+        cost_instance.fcn = lambda model: 2 * np.sum(
             (model % cost_instance.x) * cost_instance.bin_widths - 
-            cost_instance.y * log((model % cost_instance.x) * cost_instance.bin_widths)
+            cost_instance.y * np.log((model % cost_instance.x) * cost_instance.bin_widths)
         )
         return cost_instance
 

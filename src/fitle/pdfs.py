@@ -32,7 +32,6 @@ from __future__ import annotations
 import numpy as np
 from .model import Model, INPUT, const, indecise, Reduction
 from .param import Param, index
-from .mnp import exp, where, sum, log
 import math
 
 SQRT2PI = np.sqrt(2 * np.pi)
@@ -46,7 +45,7 @@ _erf.__name__ = 'erf'
 def gaussian(mu: Param | float | None = None, sigma: Param | float | None = None) -> Model:
     """Create a Gaussian (normal) probability density function.
 
-    Returns the normalized PDF: ``(1 / (sigma * sqrt(2*pi))) * exp(-0.5 * ((x - mu) / sigma)^2)``
+    Returns the normalized PDF: ``(1 / (sigma * sqrt(2*pi))) * np.exp(-0.5 * ((x - mu) / sigma)^2)``
 
     Parameters
     ----------
@@ -76,7 +75,7 @@ def gaussian(mu: Param | float | None = None, sigma: Param | float | None = None
 def exponential(tau: Param | float | None = None) -> Model:
     """Create an exponential probability density function.
 
-    Returns the normalized PDF: ``(1 / tau) * exp(-x / tau)``
+    Returns the normalized PDF: ``(1 / tau) * np.exp(-x / tau)``
 
     Parameters
     ----------
@@ -94,7 +93,7 @@ def exponential(tau: Param | float | None = None) -> Model:
     >>> e = exponential(Param.positive("lifetime")(2.5))
     """
     tau = tau if tau is not None else Param.positive('tau')
-    return (1 / tau) * exp(-INPUT / tau)
+    return (1 / tau) * np.exp(-INPUT / tau)
 
 def crystalball(alpha, n, mu, sigma):
     """
@@ -126,22 +125,22 @@ def crystalball(alpha, n, mu, sigma):
 
     pref      = n / alpha     # n/|α|
     B         = pref - alpha  # n/|α| - |α|
-    C = n / (alpha * (n - 1)) * exp(-0.5 * alpha**2)
+    C = n / (alpha * (n - 1)) * np.exp(-0.5 * alpha**2)
     D = np.sqrt(0.5*np.pi) * (1 + Model(_erf, [alpha/np.sqrt(2)]))
 
     N = 1.0 / (sigma * (C + D))
 
     # --- core Gaussian part ---
-    core = exp(-0.5 * t**2)
+    core = np.exp(-0.5 * t**2)
 
     # --- tail: computed fully in log-space ---
-    # logA = n*log(n/|α|) - α²/2
-    logA      = n * log(pref) - 0.5 * alpha**2
-    log_tail  = logA - n * log(B - t)
-    tail      = exp(log_tail)
+    # logA = n*np.log(n/|α|) - α²/2
+    logA      = n * np.log(pref) - 0.5 * alpha**2
+    log_tail  = logA - n * np.log(B - t)
+    tail      = np.exp(log_tail)
 
     # --- piecewise: Gaussian for t > -α, tail otherwise ---
-    return where(t > -alpha, N * core, N * tail)
+    return np.where(t > -alpha, N * core, N * tail)
 
 
 def convolve(
@@ -185,4 +184,4 @@ def convolve(
     weighted = w * g
     ret = Reduction(weighted, i)
     Xi = indecise(INPUT)
-    return ret / ((Xi[1]-Xi[0]) * sum(ret))
+    return ret / ((Xi[1]-Xi[0]) * np.sum(ret))

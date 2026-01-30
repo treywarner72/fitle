@@ -516,20 +516,26 @@ Discrete convolution of Gaussians with weights.
 
 ---
 
-### Module: `fitle.mnp`
+### NumPy Integration
 
-Model-aware NumPy wrappers.
-
-All NumPy functions are wrapped to work with Model objects:
+NumPy functions work directly with Model and Param objects via `__array_ufunc__` and `__array_function__` protocols:
 
 ```python
-from fitle.mnp import exp, log, sqrt, sum, where, sin, cos
+import numpy as np
+from fitle import INPUT as x, Param
 
-# Creates Model nodes instead of evaluating immediately
-model = exp(-x**2 / 2)
-model = where(x > 0, x, -x)
-model = sum(weights * values)
+# NumPy functions create Model nodes automatically
+model = np.exp(-x**2 / 2)
+model = np.where(x > 0, x, -x)
+model = np.sum(weights * values)
+
+# Works with Params too
+mu = Param('mu')
+sigma = Param.positive('sigma')
+gaussian = np.exp(-0.5 * ((x - mu) / sigma)**2)
 ```
+
+**Note:** Keyword arguments (e.g., `np.mean(x, where=...)`) are not supported for compilation. Use positional arguments or equivalent expressions.
 
 ---
 

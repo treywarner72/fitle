@@ -691,9 +691,9 @@ class TestGradient:
         assert m.grad(a)() == 6
 
     def test_grad_exp(self):
-        from fitle.mnp import exp
+        import numpy as np
         a = Param('a')(0)
-        m = exp(a)  # d/da = exp(a) = 1
+        m = np.exp(a)  # d/da = exp(a) = 1
         assert abs(m.grad(a)() - 1.0) < 1e-10
 
     def test_grad_nested(self):
