@@ -29,20 +29,20 @@ pip3 install git+https://github.com/treywarner72/fitle.git
 
 ```python
 import numpy as np
-import fitle as fl
+from fitle import Param, gaussian, fit, Cost
 
 # Generate sample data
 data = np.random.normal(1850, 10, 1000)
 
-# Define parameters with bounds and starting values
-mu    = fl.Param('mu')(1800, 2000)(1870)   # name, (min,max), start
-sigma = fl.Param.positive('sigma')(5)       # >0 constraint, start=5
+# Define parameters (auto-named from variable assignment)
+mu = ~Param                     # unbounded param, auto-named 'mu'
+sigma = +Param                  # positive param (>0), auto-named 'sigma'
 
 # Build a Gaussian PDF model
-model = fl.gaussian(mu, sigma)
+model = gaussian(mu, sigma)
 
 # Fit using unbinned negative log-likelihood
-result = fl.fit(model | fl.Cost.NLL(data))
+result = fit(model | Cost.NLL(data))
 print(result)
 # <FitResult fval=3713.952, success=True>
 # mu: 1850 +/- 0.44
@@ -61,15 +61,22 @@ model([1851, 1852, 1853, 1854])
 ```python
 from fitle import Param, INPUT, index, INDEX
 
-# Free fit parameter (THETA) with bounds and starting value
-a = Param()                           # unbounded, start=0
-b = Param('name')                     # with name
+# Shorthand with unary operators (auto-named from variable)
+a = ~Param                            # unbounded, auto-named 'a'
+sigma = +Param                        # positive (>0), auto-named 'sigma'
+neg = -Param                          # negative (<0), auto-named 'neg'
+
+# Tuple unpacking works too
+mu, sigma = ~Param, +Param            # auto-named 'mu' and 'sigma'
+
+# Explicit creation (with chaining)
+b = Param('name')                     # explicit name
 c = Param(5.0)                        # with starting value
 d = Param('name')(0, 10)(5.0)         # name, bounds, start (chainable)
 
-# Factory helpers for common constraints
-tau = Param.positive()                # >0, start=1
-f   = Param.unit()                    # [0,1], start=0.5
+# Constrained param builders
+tau = Param.positive('tau')           # >0, start=1
+f   = Param.unit('frac')              # [0,1], start=0.5
 
 # The independent variable (INPUT)
 linear = a * INPUT + b
@@ -85,20 +92,23 @@ k = index(0, 100, 2)                  # range(0, 100, 2)
 ```python
 from fitle import gaussian, exponential, Param, INPUT
 
-# Pre-built PDFs
-g1 = gaussian(Param('mu1')(1870), Param.positive('s1')(5))
-g2 = gaussian(Param('mu2')(1970), Param.positive('s2')(10))
-exp_tail = exponential(Param.positive('tau')(100))
+# Pre-built PDFs with auto-named params
+mu1, s1 = ~Param, +Param
+g1 = gaussian(mu1, s1)
+
+mu2, s2 = ~Param, +Param
+g2 = gaussian(mu2, s2)
+
+tau = +Param
+exp_tail = exponential(tau)
 
 # Composite model with normalization parameters
-composite = (
-    Param.positive('n1')(5e5) * g1 +
-    Param.positive('n2')(5e5) * g2 +
-    Param.positive('n_bg')(6e4) * exp_tail
-)
+n1, n2, n_bg = +Param, +Param, +Param
+composite = n1 * g1 + n2 * g2 + n_bg * exp_tail
 
 # Arithmetic with INPUT
-polynomial = Param('a') * INPUT**2 + Param('b') * INPUT + Param('c')
+a, b, c = ~Param, ~Param, ~Param
+polynomial = a * INPUT**2 + b * INPUT + c
 ```
 
 ---
@@ -194,7 +204,8 @@ def convolve_hist(centers, counts, mu, sigma):
     g = gaussian(c, sigma)
     return Reduction(w * g, i)
 
-model = convolve_hist(hist_centers, hist_counts, Param('mu'), Param.positive('sigma'))
+mu, sigma = ~Param, +Param
+model = convolve_hist(hist_centers, hist_counts, mu, sigma)
 ```
 
 ---
@@ -258,17 +269,39 @@ plt.legend()
 
 ### Module: `fitle.param`
 
-#### `class Param`
+#### `Param` (Builder)
 
-Symbolic parameters for model building.
+The `Param` builder creates `_Param` instances for model building.
 
+**Shorthand syntax (auto-named from variable):**
 ```python
-Param(arg0=None, arg1=None, min=None, start=None, max=None, name=None, *, range=None, kind=ParamKind.THETA)
+a = ~Param                  # unbounded param, named 'a'
+sigma = +Param              # positive param (>0), named 'sigma'
+neg = -Param                # negative param (<0), named 'neg'
+mu, sigma = ~Param, +Param  # tuple unpacking works
 ```
+
+**Explicit creation:**
+```python
+Param()                     # unbounded, auto-named
+Param('name')               # explicit name
+Param(5.0)                  # start value, auto-named
+Param(0, 10)                # bounds [0,10], auto-named
+Param('x')(0, 10)(5.0)      # chained: name, bounds, start
+```
+
+**Constrained builders:**
+- `Param.positive(name=None)` - Positive parameter (min=1e-6, start=1)
+- `Param.negative(name=None)` - Negative parameter (max=-1e-6, start=-1)
+- `Param.unit(name=None)` - Unit interval [0,1] (start=0.5)
+
+#### `_Param` (Instance)
+
+The actual parameter object (created by `Param` builder).
 
 **Attributes:**
 - `kind` - Parameter role: `THETA` (optimizable), `INPUT` (data), or `INDEX` (loop variable)
-- `name` - Optional string identifier
+- `name` - String identifier (may be auto-detected)
 - `min`, `max` - Bounds for optimization (THETA only)
 - `start` - Initial value for optimization
 - `value` - Current value (updated during fitting)
@@ -276,11 +309,7 @@ Param(arg0=None, arg1=None, min=None, start=None, max=None, name=None, *, range=
 - `range` - Loop range (INDEX only)
 
 **Methods:**
-- `__call__(arg0, arg1=None)` - Chainable setter: string sets name, number sets start, two numbers set bounds. Returns `self`.
-
-**Class Methods:**
-- `Param.positive(name=None)` - Factory for positive parameters (min=1e-6, start=1)
-- `Param.unit(name=None)` - Factory for [0,1] parameters (start=0.5)
+- `__call__(arg0, arg1=None)` - Chainable setter: string sets name, number sets start, two numbers set bounds
 
 #### `INPUT`
 
@@ -479,7 +508,11 @@ Normalized Gaussian PDF.
 # Default parameters (auto-created)
 g = gaussian()
 
-# Custom parameters
+# Custom parameters with shorthand
+mu, sigma = ~Param, +Param
+g = gaussian(mu, sigma)
+
+# Explicit with chaining
 g = gaussian(Param('mean')(5.0), Param.positive('width')(1.0))
 ```
 
@@ -489,7 +522,10 @@ Normalized exponential PDF: `(1/tau) * exp(-x/tau)`.
 
 ```python
 e = exponential()
-e = exponential(Param.positive('lifetime')(2.5))
+
+# With shorthand
+tau = +Param
+e = exponential(tau)
 ```
 
 #### `crystalball(alpha, n, mu, sigma) -> Model`
@@ -530,8 +566,7 @@ model = np.where(x > 0, x, -x)
 model = np.sum(weights * values)
 
 # Works with Params too
-mu = Param('mu')
-sigma = Param.positive('sigma')
+mu, sigma = ~Param, +Param
 gaussian = np.exp(-0.5 * ((x - mu) / sigma)**2)
 ```
 

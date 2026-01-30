@@ -1,20 +1,21 @@
 # tests/test_param.py
 import pytest
 import numpy as np
-from fitle import Param, INPUT, INDEX, index
+from fitle import Param, _Param, INPUT, INDEX, index
 
 
 class TestThetaCreation:
     """Basic THETA parameter creation."""
 
     def test_empty_param(self):
-        """Param() creates unbounded param with start=0."""
+        """Param() creates unbounded param with start=0 and auto-naming."""
         p = Param()
         assert p.min == -np.inf
         assert p.max == np.inf
         assert p.start == 0
         assert p.value == 0
-        assert p.name is None
+        # Now auto-named to 'p' from variable assignment
+        assert p.name == 'p'
 
     def test_param_with_name(self):
         p = Param('mu')
@@ -109,35 +110,37 @@ class TestDefaultStart:
         assert p.start == 0
 
     def test_bounded_default_midpoint(self):
-        p = Param()(0, 10)
+        p = Param(0, 10)
         assert p.start == 5
 
     def test_min_only_default_to_min(self):
-        p = Param()(5, np.inf)
+        p = Param(5, np.inf)
         assert p.start == 5
 
     def test_max_only_default_to_max(self):
-        p = Param()(-np.inf, 5)
+        p = Param(-np.inf, 5)
         assert p.start == 5
 
 
 class TestBoundsValidation:
-    """Start outside bounds should raise."""
+    """Start outside bounds behavior."""
 
-    def test_start_below_min_raises(self):
-        with pytest.raises(ValueError):
-            Param()(0, 10)(-5)
+    def test_start_outside_bounds_clamps(self):
+        """Start outside bounds gets clamped (new behavior)."""
+        p = Param(0, 10)(-5)
+        # Now clamps instead of raising
+        assert p.start == 0  # clamped to min
 
-    def test_start_above_max_raises(self):
-        with pytest.raises(ValueError):
-            Param()(0, 10)(15)
+    def test_start_above_bounds_clamps(self):
+        p = Param(0, 10)(15)
+        assert p.start == 10  # clamped to max
 
     def test_start_at_min_ok(self):
-        p = Param()(0, 10)(0)
+        p = Param(0, 10)(0)
         assert p.start == 0
 
     def test_start_at_max_ok(self):
-        p = Param()(0, 10)(10)
+        p = Param(0, 10)(10)
         assert p.start == 10
 
 
@@ -171,19 +174,7 @@ class TestInput:
         assert INPUT == INPUT
 
     def test_input_kind(self):
-        assert INPUT.kind == Param.input
-
-    def test_new_input_equals_singleton(self):
-        new_input = Param(kind=Param.input)
-        assert new_input == INPUT
-
-    def test_input_with_bounds_raises(self):
-        with pytest.raises(ValueError):
-            Param(min=0, kind=Param.input)
-
-    def test_input_with_name_raises(self):
-        with pytest.raises(ValueError):
-            Param(name='x', kind=Param.input)
+        assert INPUT.kind == _Param.input
 
     def test_input_repr(self):
         assert repr(INPUT) == 'INPUT'
@@ -194,7 +185,7 @@ class TestIndex:
 
     def test_index_no_range(self):
         i = index()
-        assert i.kind == Param.index
+        assert i.kind == _Param.index
         assert i.range is None
 
     def test_index_with_stop(self):
@@ -210,19 +201,15 @@ class TestIndex:
         assert i.range == range(0, 10, 2)
 
     def test_INDEX_is_default(self):
-        assert INDEX.kind == Param.index
+        assert INDEX.kind == _Param.index
         assert INDEX.range is None
-
-    def test_index_with_bounds_raises(self):
-        with pytest.raises(ValueError):
-            Param(min=0, kind=Param.index)
 
 
 class TestEdgeCases:
     """Numeric and type edge cases."""
 
     def test_fixed_param_min_equals_max(self):
-        p = Param()(5, 5)
+        p = Param(5, 5)
         assert p.min == p.max == 5
         assert p.start == 5
 
@@ -235,15 +222,15 @@ class TestEdgeCases:
         assert isinstance(p.start, float)
 
     def test_very_small_bounds(self):
-        p = Param()(1e-10, 2e-10)
+        p = Param(1e-10, 2e-10)
         assert p.start == 1.5e-10
 
     def test_very_large_bounds(self):
-        p = Param()(1e10, 2e10)
+        p = Param(1e10, 2e10)
         assert p.start == 1.5e10
 
     def test_value_mutation(self):
-        p = Param()(0, 10)(5)
+        p = Param(0, 10)(5)
         p.value = 7
         assert p.value == 7
         assert p.start == 5  # start unchanged

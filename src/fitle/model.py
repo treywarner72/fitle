@@ -26,7 +26,7 @@ import numpy as np
 from numba import njit, types
 from numba.typed import Dict
 import typing
-from .param import Param, INPUT, INDEX
+from .param import Param, _Param, INPUT, INDEX
 from collections.abc import Iterable, Callable
 from collections import defaultdict, OrderedDict
 import operator
@@ -163,7 +163,7 @@ class Model:
                     walk(item)
             elif isinstance(m, (int, float, np.number)):
                 return
-            elif isinstance(m, Param) and m.kind not in (Param.input, Param.index):
+            elif isinstance(m, _Param) and m.kind not in (_Param.input, _Param.index):
                 if m not in seen:
                     seen.add(m)
                     flat.append(m)
@@ -193,7 +193,7 @@ class Model:
                     walk(item)
             elif isinstance(m, (int, float, np.number)):
                 return
-            elif isinstance(m, Param) and m.kind in (Param.input, Param.index):
+            elif isinstance(m, _Param) and m.kind in (_Param.input, _Param.index):
                 if m not in seen:
                     seen.add(m)
                     flat.append(m)
@@ -206,7 +206,7 @@ class Model:
         """
 
         def walk(m):
-            if isinstance(m, Param):
+            if isinstance(m, _Param):
                 return ("param", m.kind)
             elif isinstance(m, Reduction):
                 return ("reduce", walk(m.model), hash(m.index), m.op.__name__)
@@ -252,10 +252,10 @@ class Model:
             return False
 
         def walk(a, b):
-            if isinstance(a, Param) and isinstance(b, Param):
+            if isinstance(a, _Param) and isinstance(b, _Param):
                 if a.kind != b.kind:
                     return False
-                if a.kind != Param.input:
+                if a.kind != _Param.input:
                     return a is b
                 else:
                     return True
@@ -281,7 +281,7 @@ class Model:
 
         return walk(self, other)
 
-    def eval_py(self, x: NDArray[np.floating] | None, index_map: dict[Param, int]) -> Any:
+    def eval_py(self, x: NDArray[np.floating] | None, index_map: dict[_Param, int]) -> Any:
         """Evaluate the model using pure Python (no Numba).
 
         Recursively evaluates the expression tree by calling each
@@ -291,7 +291,7 @@ class Model:
         ----------
         x : ndarray | None
             Input data array, or None if the model has no INPUT dependency.
-        index_map : dict[Param, int]
+        index_map : dict[_Param, int]
             Mapping from INDEX parameters to their current integer values.
 
         Returns
@@ -328,16 +328,16 @@ class Model:
                         collected_warnings.append((base_msg, m, w.category))
 
                 return result
-            if isinstance(m, Param):
-                if m.kind == Param.theta:
+            if isinstance(m, _Param):
+                if m.kind == _Param.theta:
                     return m.value
-                if m.kind == Param.input:
+                if m.kind == _Param.input:
                     return x
-                if m.kind == Param.index:
+                if m.kind == _Param.index:
                     return index_map[m]
                 raise ValueError(
                     f"Unknown parameter kind: {m.kind!r}.\n"
-                    f"  Expected: Param.theta, Param.input, or Param.index.\n"
+                    f"  Expected: _Param.theta, _Param.input, or _Param.index.\n"
                     f"  This usually indicates a corrupted Param object."
                 )
             return m
@@ -351,7 +351,7 @@ class Model:
 
         return result
 
-    def eval(self, x: NDArray[np.floating] | None, index_map: dict[Param, int], numba: bool = False) -> Any:
+    def eval(self, x: NDArray[np.floating] | None, index_map: dict[_Param, int], numba: bool = False) -> Any:
         """Evaluate the model, using compiled code if available.
 
         Checks the compilation cache for a Numba-compiled version of this
@@ -362,7 +362,7 @@ class Model:
         ----------
         x : ndarray | None
             Input data array, or None if the model has no INPUT dependency.
-        index_map : dict[Param, int]
+        index_map : dict[_Param, int]
             Mapping from INDEX parameters to their current integer values.
         numba : bool, default False
             If True, raises an error when no compiled function is available.
@@ -382,7 +382,7 @@ class Model:
         else:
             theta = np.array([p.value for p in self.params])
 
-        index_params = [p for p in self.free if p.kind == Param.index]
+        index_params = [p for p in self.free if p.kind == _Param.index]
         index_list = [index_map[p] for p in index_params] if index_params else None
 
         current_hash = hash(self) # Hash depends on symbolic structure
@@ -393,7 +393,7 @@ class Model:
                 raise AttributeError("No compiled function in cache")
             return self.eval_py(x, index_map)
 
-    def __call__(self, x: NDArray[np.floating] | Param | Model | None = None) -> Any:
+    def __call__(self, x: NDArray[np.floating] | _Param | Model | None = None) -> Any:
         """Evaluate the model or perform substitution.
 
         The behavior depends on the argument type:
@@ -403,7 +403,7 @@ class Model:
 
         Parameters
         ----------
-        x : ndarray | Param | Model | None, optional
+        x : ndarray | _Param | Model | None, optional
             Input data for evaluation, or a Param/Model for substitution.
 
         Returns
@@ -423,7 +423,7 @@ class Model:
         >>> model(other_param)  # Substitute (same as model % other_param)
         """
         # If x is a Param/Model, treat as substitution, not evaluation
-        if isinstance(x, (Param, Model)):
+        if isinstance(x, (_Param, Model)):
             return self % x
         if x is not None and not isinstance(x, np.ndarray):
             x = np.asarray(x)
@@ -521,9 +521,9 @@ class Model:
                 return new_node
 
             # --- Params ---
-            if isinstance(node, Param):
+            if isinstance(node, _Param):
                 # Keep INPUT/INDEX singletons shared
-                if node.kind in (Param.input, Param.index):
+                if node.kind in (_Param.input, _Param.index):
                     return node
 
                 # Clone θ-params, reusing mapping so they stay consistent
@@ -776,7 +776,7 @@ def bind_ops(cls):
         setattr(cls, name, op_method)
 
 bind_ops(Model)
-bind_ops(Param)
+bind_ops(_Param)
 
 
 # Reduction
@@ -815,8 +815,8 @@ class Reduction(Model):
     """
     _supported_ops = {operator.add: 'add'}  # Only add is supported by compiler
 
-    def __init__(self, model: Model, index_param: Param, op: Callable = operator.add):
-        if not isinstance(index_param, Param):
+    def __init__(self, model: Model, index_param: _Param, op: Callable = operator.add):
+        if not isinstance(index_param, _Param):
             raise TypeError("Reduction index must be a Param")
         if op not in Reduction._supported_ops:
             raise ValueError(
@@ -885,7 +885,7 @@ def const(val: Any) -> Model:
     f.__name__ = f"const"
     return Model(f, [])
 
-def indecise(obj: Any, index: Param = INDEX) -> Model:
+def indecise(obj: Any, index: _Param = INDEX) -> Model:
     """Create a Model that selects from an array by index.
 
     Wraps an array (or constant) so that it can be indexed by
@@ -922,7 +922,7 @@ def indecise(obj: Any, index: Param = INDEX) -> Model:
 def _zero(): return 0
 def _one(): return 1
 
-def _grad_fn(model: Model | Param | Any, wrt: Param) -> Model | int:
+def _grad_fn(model: Model | _Param | Any, wrt: _Param) -> Model | int:
     """Compute the symbolic gradient of a model w.r.t. a parameter.
 
     Recursively applies differentiation rules to build a new Model
@@ -931,7 +931,7 @@ def _grad_fn(model: Model | Param | Any, wrt: Param) -> Model | int:
 
     Parameters
     ----------
-    model : Model | Param | Any
+    model : Model | _Param | Any
         The expression to differentiate.
     wrt : Param
         The parameter to differentiate with respect to.
@@ -946,7 +946,7 @@ def _grad_fn(model: Model | Param | Any, wrt: Param) -> Model | int:
     ValueError
         If an unsupported operation is encountered.
     """
-    if isinstance(model, Param):
+    if isinstance(model, _Param):
         return _one() if model is wrt else _zero()
 
     if not isinstance(model, Model):
@@ -997,7 +997,7 @@ def _grad_fn(model: Model | Param | Any, wrt: Param) -> Model | int:
     if fn == 'pow':
         base, exp = args
         df = _grad_fn(base, wrt)
-        if isinstance(exp, (Model, Param)) and not base is exp:
+        if isinstance(exp, (Model, _Param)) and not base is exp:
             return model * (_grad_fn(exp, wrt) * np.log(base) + exp * df / base)
         elif isinstance(exp, Model) and exp.params:
             return model * (_grad_fn(exp, wrt) * np.log(base) + exp * df / base)
@@ -1008,7 +1008,7 @@ def _grad_fn(model: Model | Param | Any, wrt: Param) -> Model | int:
     if fn == 'rpow':
         exp, base = args
         df = _grad_fn(base, wrt)
-        if isinstance(exp, (Model, Param)) and not base is exp:
+        if isinstance(exp, (Model, _Param)) and not base is exp:
             return model * (_grad_fn(exp, wrt) * np.log(base) + exp * df / base)
         elif isinstance(exp, Model) and exp.params:
             return model * (_grad_fn(exp, wrt) * np.log(base) + exp * df / base)
@@ -1023,7 +1023,7 @@ def _grad_fn(model: Model | Param | Any, wrt: Param) -> Model | int:
             for e in entries:
                 if isinstance(e, Model):
                     grads.append(_grad_fn(e, wrt))
-                elif isinstance(e, Param):
+                elif isinstance(e, _Param):
                     grads.append(_one() if e is wrt else _zero())
                 else:
                     grads.append(_zero())
@@ -1052,7 +1052,7 @@ def _grad_fn(model: Model | Param | Any, wrt: Param) -> Model | int:
 def _grad(self, wrt=None):
     if wrt is None:
         wrt = self.params
-    if isinstance(wrt, Param):
+    if isinstance(wrt, _Param):
         return ensure_model(_grad_fn(self, wrt)).simplify()
     if isinstance(wrt, (list, tuple)):
         return vector(*[ensure_model(_grad_fn(self, p)).simplify() for p in wrt])
@@ -1134,7 +1134,7 @@ def formula(fn: Callable) -> Callable[..., Model]:
 
 def _is_scalar_equal(x, val):
     """Check if x equals val, handling floats with tolerance."""
-    if isinstance(x, (Model, Param)):
+    if isinstance(x, (Model, _Param)):
         return False
     if isinstance(x, (int, float, np.number)):
         return np.isclose(x, val, rtol=1e-14, atol=1e-14)
@@ -1221,7 +1221,7 @@ def simplify(m: Model | Any) -> Model | Any:
 Model.simplify = simplify
 
 
-def shape(obj: Any) -> tuple | Param:
+def shape(obj: Any) -> tuple | _Param:
     """Infer the output shape of a model or value.
 
     Recursively determines what shape the expression will produce
@@ -1234,7 +1234,7 @@ def shape(obj: Any) -> tuple | Param:
 
     Returns
     -------
-    tuple | Param
+    tuple | _Param
         The shape as a tuple, or INPUT if the shape depends on input data.
     """
     if isinstance(obj, (int, float, np.number)):
@@ -1246,7 +1246,7 @@ def shape(obj: Any) -> tuple | Param:
     if obj is INPUT:
         return INPUT                       # e.g. you called shape(X) directly
 
-    if isinstance(obj, Param):
+    if isinstance(obj, _Param):
         return ()                      # θ_k etc. are scalars
 
     if isinstance(obj, Reduction):

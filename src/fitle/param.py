@@ -1,137 +1,288 @@
 """param.py
 =========
-Symbolic parameters used throughout the library
-----------------------------------------------------------
+Symbolic parameters for model building.
 
-Three mutually–exclusive roles exist:
+The main interface is the `Param` builder which creates `_Param` instances:
 
-THETA
-    A free model parameter to be optimised.  Optionally carries
-    ``min`` / ``max`` bounds and a starting value ``start``.
-INPUT
-    Represents the input, when a parameter is plugged into a model. 
-    Often repaced with data for cost functions.
-INDEX
-    Integer loop control used by ``Reduction`` objects.  Holds a
-    Python :class:`range` instead of numeric bounds.
+    # Shorthand with unary operators (auto-named from variable)
+    a = ~Param                # unbounded, auto-named 'a'
+    sigma = +Param            # positive (>0), auto-named 'sigma'
+    neg = -Param              # negative (<0), auto-named 'neg'
 
-Factory helpers create the most common bounded flavours::
+    # Explicit creation
+    a = Param(5)              # unbounded, start=5, auto-named 'a'
+    b = Param('b')            # unbounded, explicit name 'b'
+    c = Param(0, 10)          # bounded [0,10], auto-named 'c'
 
-    mu     = Param()              # unbounded, start 0
-    sigma  = Param.positive()     # >0, start 1
-    weight = Param.unit()         # 0–1, start 0.5
+    # Chaining works
+    f = Param('f')(5)(0, 10)  # name='f', start=5, bounds=[0,10]
 
-Further tweaks are chainable in any order, e.g.::
+    # Constrained params (explicit)
+    sigma = Param.positive('sigma')
+    frac = Param.unit('frac')
 
-    P('sigma')(2.0)(0.1, 10)    # name, start, bounds in one line
-
-So, using __call__, a string sets the name, a scalar the starting value, and two scalars for the bounds
-
+    # Tuple unpacking with auto-naming
+    mu, sigma = ~Param, +Param
 """
 from __future__ import annotations
 
 import numpy as np
 from enum import Enum, auto
-from typing import Any, Optional, Tuple
+from typing import Tuple
 
 __all__ = [
     "ParamKind",
     "Param",
-    "ParamFactory",
+    "_Param",
     "INPUT",
     "index",
-    "INDEX"
+    "INDEX",
 ]
 
 
 class ParamKind(Enum):
     """Enumerates the recognised parameter roles."""
-
     THETA = auto()   #: free, optimisable parameter
     INPUT = auto()   #: singleton placeholder for X
     INDEX = auto()   #: integer loop variable (carries :class:`range`)
 
 
-class Param:
-    """Different kinds of parameters used in :class:`Model`s.
+# -----------------------------------------------------------------------------
+#   Variable name detection for auto-naming
+# -----------------------------------------------------------------------------
 
-    Parameters
-    ----------
-    min, max : float | None, optional
-        Numerical bounds (THETA only).
-    start : float | None, optional
-        Initial value; defaults to 0 or the midpoint of bounds.
-    name : str | None, optional
-        Cosmetic identifier used in repr / str.
-    range : range | None, keyword‑only
-        Loop range (INDEX only).
-    kind : ParamKind, default ``THETA``
-        Role selector.
+_varname_cache: dict[tuple, int] = {}  # (filename, lineno) -> call index
+
+
+def _split_top_level_commas(s: str) -> list[str]:
+    """Split string by commas, but only at top level (not inside parens/brackets)."""
+    parts = []
+    current = []
+    depth = 0
+    for c in s:
+        if c in '([':
+            depth += 1
+            current.append(c)
+        elif c in ')]':
+            depth -= 1
+            current.append(c)
+        elif c == ',' and depth == 0:
+            parts.append(''.join(current))
+            current = []
+        else:
+            current.append(c)
+    if current:
+        parts.append(''.join(current))
+    return parts
+
+
+def _is_simple_param_expr(rhs: str) -> bool:
+    """Check if RHS contains only simple Param expressions.
+
+    Matches: ~Param, +Param, -Param, Param(5), Param.positive('x'), etc.
+    Does NOT match: Param(5) + Param(3), gaussian(Param()), etc.
+    """
+    import re
+    # Pattern: optional unary op (~, +, -), identifier with optional .attr, followed by optional () chains
+    pattern = r'^\s*[~+\-]?\s*\w+(\.\w+)?(\(.*?\))*\s*$'
+    parts = _split_top_level_commas(rhs)
+    return all(re.match(pattern, part.strip()) for part in parts)
+
+
+def _detect_varname(depth: int = 2) -> str | None:
+    """Detect variable name from assignment in calling frame.
+
+    Only returns a name for simple direct assignments like:
+        a = ~Param
+        a, b = ~Param, +Param
+        x = Param(5)
+
+    Returns None for complex expressions like:
+        y = ~Param + ~Param
+        m = gaussian(~Param)
+    """
+    import inspect
+    import re
+
+    try:
+        frame = inspect.currentframe()
+        for _ in range(depth):
+            if frame is None:
+                return None
+            frame = frame.f_back
+        if frame is None:
+            return None
+
+        info = inspect.getframeinfo(frame)
+        if not info.code_context:
+            return None
+
+        line = info.code_context[0]
+        key = (info.filename, info.lineno)
+
+        # Strip comments (simple approach: remove # and everything after if not in string)
+        # This handles common cases like: a = ~Param  # comment
+        comment_pos = line.find('#')
+        if comment_pos != -1:
+            # Check it's not inside a string by counting quotes before it
+            before = line[:comment_pos]
+            if before.count("'") % 2 == 0 and before.count('"') % 2 == 0:
+                line = before
+
+        # Parse LHS and RHS of assignment
+        match = re.match(r'\s*([\w\s,]+)\s*=\s*(.+)$', line)
+        if not match:
+            return None
+
+        lhs = match.group(1)
+        rhs = match.group(2)
+
+        # Only auto-name for simple Param expressions
+        if not _is_simple_param_expr(rhs):
+            return None
+
+        names = [n.strip() for n in lhs.split(',')]
+        rhs_parts = _split_top_level_commas(rhs)
+
+        # Must have same number of LHS vars and RHS parts
+        if len(names) != len(rhs_parts):
+            return None
+
+        if len(names) == 1:
+            return names[0]
+
+        # Tuple unpacking: track position
+        call_index = _varname_cache.get(key, 0)
+
+        # Reset if we've gone past the end (re-execution of same line)
+        if call_index >= len(names):
+            call_index = 0
+
+        _varname_cache[key] = call_index + 1
+
+        return names[call_index]
+
+    except Exception:
+        return None
+
+
+# -----------------------------------------------------------------------------
+#   _Param: The actual parameter class
+# -----------------------------------------------------------------------------
+
+class _Param:
+    """Internal parameter class. Use `Param` builder to create instances.
+
+    Three mutually-exclusive roles:
+    - THETA: Free parameter for optimization (has min/max/start/value)
+    - INPUT: Placeholder for input data
+    - INDEX: Integer loop variable (has range)
     """
 
-    # convenience aliases
     theta = ParamKind.THETA
     input = ParamKind.INPUT
     index = ParamKind.INDEX
 
     def __init__(
         self,
-        arg0: float | str | None = None, 
-        arg1: float | None = None,
-        min: float | None = None,
-        start: float | None = None,
-        max: float | None = None,
         name: str | None = None,
+        min: float | None = None,
+        max: float | None = None,
+        start: float | None = None,
         *,
-        range: range | None = None,
         kind: ParamKind = ParamKind.THETA,
+        range: range | None = None,
     ):
         self.kind = kind
         self.name = name
 
-        # INPUT – no metadata allowed
         if kind is ParamKind.INPUT:
-            if any(x is not None for x in (min, start, max, name, range)):
-                raise ValueError("INPUT parameter must not carry bounds or name")
             return
 
-        # INDEX – only a range
         if kind is ParamKind.INDEX:
-            if any(x is not None for x in (min, start, max)):
-                raise ValueError("INDEX parameter cannot have numeric bounds")
-            self.range = range  # type: ignore[assignment]
+            self.range = range
             return
 
-        # THETA – store optimisation metadata
+        # THETA
+        self.range = None
         self.min = min if min is not None else -np.inf
         self.max = max if max is not None else np.inf
-        self.range = None  # Only used by INDEX, but initialize for consistency
-        self.start = None
-        self.value = None
 
-        if arg0 is not None:
-            if arg1 is not None:
-                self(arg0,arg1)
+        # Compute default start
+        if start is not None:
+            self.start = start
+        elif self.min == -np.inf and self.max == np.inf:
+            self.start = 0.0
+        elif self.min == -np.inf:
+            self.start = float(self.max)
+        elif self.max == np.inf:
+            self.start = float(self.min)
+        else:
+            self.start = 0.5 * (self.min + self.max)
+
+        self.value = self.start
+
+    def __call__(self, arg0: str | float, arg1: float | None = None) -> '_Param':
+        """Chain configuration: param('name'), param(5), param(0, 10)."""
+        if arg1 is not None:
+            # Set bounds
+            new_min, new_max = float(arg0), float(arg1)
+            # Recompute start if needed
+            if self.start < new_min or self.start > new_max:
+                if new_min == -np.inf:
+                    new_start = float(new_max) if new_max != np.inf else 0.0
+                elif new_max == np.inf:
+                    new_start = float(new_min)
+                else:
+                    new_start = 0.5 * (new_min + new_max)
             else:
-                self(arg0)
-
-        if self.start is None:
-            self.start = start if start is not None else 0
-            
-        self.value: float | None = self.start
+                new_start = self.start
+            return _Param(
+                name=self.name,
+                min=new_min,
+                max=new_max,
+                start=new_start,
+            )
+        elif isinstance(arg0, str):
+            # Set name
+            return _Param(
+                name=arg0,
+                min=self.min,
+                max=self.max,
+                start=self.start,
+            )
+        elif isinstance(arg0, (int, float)):
+            # Set start
+            new_start = float(arg0)
+            # Clamp to bounds
+            if new_start < self.min:
+                new_start = self.min
+            if new_start > self.max:
+                new_start = self.max
+            return _Param(
+                name=self.name,
+                min=self.min,
+                max=self.max,
+                start=new_start,
+            )
+        else:
+            raise TypeError(
+                f"_Param(...) expects str (name), number (start), or two numbers (bounds), "
+                f"got {type(arg0).__name__}"
+            )
 
     # ------------------------------------------------------------------
-    #   Comparison & hashing
+    #   Identity-based equality (operators are added by bind_ops in model.py)
     # ------------------------------------------------------------------
 
-    def __eq__(self, other: object) -> bool:  # noqa: D401
-        if not isinstance(other, Param):
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _Param):
             return False
         if self.kind is self.input and other.kind is other.input:
-            return True  # all INPUT placeholders are equivalent
+            return True
         return self is other
 
-    def __hash__(self) -> int:  # noqa: D401 – identity hash
+    def __hash__(self) -> int:
         return id(self)
 
     # ------------------------------------------------------------------
@@ -139,13 +290,10 @@ class Param:
     # ------------------------------------------------------------------
 
     def __array_ufunc__(self, ufunc, method, *inputs, **ufunc_kwargs):
-        """Handle numpy ufuncs like np.exp, np.sin, np.add, etc."""
         if method != '__call__':
             return NotImplemented
-        # Late import to avoid circular dependency
         from .model import Model
 
-        # Numba can't handle **kwargs - only include if non-empty
         if ufunc_kwargs:
             def inner(*inner_args):
                 return ufunc(*inner_args, **ufunc_kwargs)
@@ -158,11 +306,8 @@ class Param:
         return Model(inner, list(inputs))
 
     def __array_function__(self, func, types, args, kwargs):
-        """Handle numpy functions like np.dot, np.matmul, np.sum, etc."""
-        # Late import to avoid circular dependency
         from .model import Model
 
-        # Numba can't handle **kwargs - only include if non-empty
         if kwargs:
             def inner(*inner_args):
                 return func(*inner_args, **kwargs)
@@ -175,16 +320,10 @@ class Param:
         return Model(inner, list(args))
 
     # ------------------------------------------------------------------
-    #   Printable helpers
+    #   String representations
     # ------------------------------------------------------------------
-    def _prefix(self) -> str:
-        """Return the name prefix for string representations.
 
-        Returns
-        -------
-        str
-            ``"name="`` if a name is set, otherwise ``""``.
-        """
+    def _prefix(self) -> str:
         return f"{self.name}=" if self.name else ""
 
     def __repr__(self) -> str:
@@ -195,13 +334,13 @@ class Param:
                 return "INDEX"
             return f"{self._prefix()}{self.range}"
         if self.min == self.max:
-            return f"{self._prefix()}Param(value={self.value})"
+            return f"{self._prefix()}_Param(value={self.value})"
         return (
-            f"{self._prefix()}Param(min={self.min}, start={self.start}, "
+            f"{self._prefix()}_Param(min={self.min}, start={self.start}, "
             f"max={self.max}, value={self.value})"
         )
 
-    def __str__(self) -> str:  # noqa: D401
+    def __str__(self) -> str:
         if self.kind is self.input:
             return "INPUT"
         if self.kind is self.index:
@@ -212,101 +351,177 @@ class Param:
             return f"{self._prefix()}{self.value:.4g} ± {self.error:.2g}"
         return f"{self._prefix()}{self.value:.4g}"
 
-    # ------------------------------------------------------------------
-    #   Mutating helpers
-    # ------------------------------------------------------------------
-    def __call__(self, arg0: str | np.number, arg1: np.number | None = None) -> Param:
-        if arg1 is not None:
-            self.min, self.max = arg0, arg1
-            # Compute natural default for these bounds
-            if self.min == -np.inf and self.max == np.inf:
-                natural = 0.0
-            elif self.min == -np.inf:
-                natural = float(self.max)
-            elif self.max == np.inf:
-                natural = float(self.min)
-            else:
-                natural = 0.5 * (self.min + self.max)
-            # Reset if: outside bounds, or start is at old default (0) and new default differs
-            outside = self.start is None or self.start < self.min or self.start > self.max
-            at_old_default = (self.start == 0 and natural != 0)
-            if outside or at_old_default:
-                self.start = natural
-                self.value = self.start
-            return self
-        # Rename (str) or set start value (numeric).
-        if isinstance(arg0, str):
-            self.name = arg0
-        elif isinstance(arg0, (int, float, np.number)):
-            if self.min is not None and arg0 < self.min:
-                raise ValueError("start below min bound")
-            if self.max is not None and arg0 > self.max:
-                raise ValueError("start above max bound")
-            self.start = float(arg0)
-            self.value = float(arg0)
-        else:
-            raise TypeError("Param.__call__ expects str or numeric")
-        return self
 
 # -----------------------------------------------------------------------------
-#   Factory helpers
+#   Param: The builder class (public API)
 # -----------------------------------------------------------------------------
 
-class ParamFactory:
-    """Callable/sliceable object that returns pre‑configured ``Param``s.
+_MISSING = object()  # sentinel for distinguishing Param() from Param(None)
 
-    Parameters
-    ----------
-    default_limits : tuple[float, float]
-        The (min, max) bounds to apply by default.
-    default_start : float
-        The default starting value for created parameters.
 
-    Examples
-    --------
-    >>> positive = ParamFactory((1e-6, np.inf), 1)
-    >>> sigma = positive("sigma")  # Creates a positive parameter named "sigma"
+class _ParamBuilder:
+    """Builder for creating _Param instances.
+
+    Use via the singleton `Param`:
+        a = Param(5)           # _Param with start=5, auto-named 'a'
+        b = Param('b')         # _Param with explicit name 'b'
+        c = Param(0, 10)       # _Param with bounds [0, 10], auto-named 'c'
     """
 
-    def __init__(self, default_limits: Tuple[float, float], default_start: float):
-        self._limits = default_limits
-        self._start = default_start
+    def __call__(self, arg0: str | float = _MISSING, arg1: float | None = None) -> _Param:
+        """Create a _Param with configuration."""
+        name = None
+        start = None
+        bounds = None
 
-    def __call__(self, arg0: str | np.number | None = None, arg1: np.number | None = None) -> Param:
-        """Create a new Param with preconfigured bounds.
+        if arg0 is _MISSING:
+            # Param() - just auto-name
+            name = _detect_varname(depth=2)
+        elif arg1 is not None:
+            # Param(min, max) - bounds
+            bounds = (float(arg0), float(arg1))
+            name = _detect_varname(depth=2)
+        elif isinstance(arg0, str):
+            # Param('name') - explicit name
+            name = arg0
+        elif isinstance(arg0, (int, float)):
+            # Param(5) - start value
+            start = float(arg0)
+            name = _detect_varname(depth=2)
+        else:
+            raise TypeError(
+                f"Param(...) expects str (name), number (start), or two numbers (bounds), "
+                f"got {type(arg0).__name__}"
+            )
 
-        Parameters
-        ----------
-        arg0 : str | float | None, optional
-            If str, sets the parameter name. If numeric, sets the start value.
-        arg1 : float | None, optional
-            If provided with arg0, sets bounds as (arg0, arg1).
+        if bounds is not None:
+            return _Param(name=name, min=bounds[0], max=bounds[1], start=start)
+        else:
+            return _Param(name=name, start=start)
 
-        Returns
-        -------
-        Param
-            A new parameter instance with the factory's default bounds applied.
-        """
-        p = Param()(*self._limits)(self._start)
-        if arg0 is not None:
-            if arg1 is not None:
-                return p(arg0, arg1)
-            return p(arg0)
-        return p
+    def _not_finalized_error(self):
+        raise TypeError(
+            "Param must be called before use in expressions.\n"
+            "  Examples:\n"
+            "    Param('x')       # named\n"
+            "    Param(5)         # with start value\n"
+            "    Param(0, 10)     # with bounds\n"
+            "    Param()          # unbounded, auto-named"
+        )
+
+    def __add__(self, other): self._not_finalized_error()
+    def __radd__(self, other): self._not_finalized_error()
+    def __sub__(self, other): self._not_finalized_error()
+    def __rsub__(self, other): self._not_finalized_error()
+    def __mul__(self, other): self._not_finalized_error()
+    def __rmul__(self, other): self._not_finalized_error()
+    def __truediv__(self, other): self._not_finalized_error()
+    def __rtruediv__(self, other): self._not_finalized_error()
+    def __pow__(self, other): self._not_finalized_error()
+    def __rpow__(self, other): self._not_finalized_error()
+
+    def __invert__(self) -> _Param:
+        """~Param: Create unbounded _Param with auto-naming."""
+        return _Param(name=_detect_varname(depth=2))
+
+    def __pos__(self) -> _Param:
+        """+Param: Create positive _Param with auto-naming."""
+        return _Param(name=_detect_varname(depth=2), min=1e-6, max=np.inf, start=1.0)
+
+    def __neg__(self) -> _Param:
+        """-Param: Create negative _Param with auto-naming."""
+        return _Param(name=_detect_varname(depth=2), min=-np.inf, max=-1e-6, start=-1.0)
+
+    def __repr__(self) -> str:
+        return "Param"
 
 
-Param.positive = ParamFactory((1e-6, np.inf), 1)         # positive
-Param.unit = ParamFactory((0, 1), 0.5)               # 0–1 interval
+# The singleton builder
+Param = _ParamBuilder()
 
 
 # -----------------------------------------------------------------------------
-#   Module‑level helpers
+#   Constrained param builders
 # -----------------------------------------------------------------------------
 
-INPUT: Param = Param(kind=Param.input)          # singleton INPUT placeholder
+class _PositiveBuilder:
+    """Builder for positive params: Param.positive('name') or Param.positive(start)"""
+    def __call__(self, arg0: str | float | None = None) -> _Param:
+        if arg0 is None:
+            name = _detect_varname(depth=2)
+            return _Param(name=name, min=1e-6, max=np.inf, start=1.0)
+        elif isinstance(arg0, str):
+            return _Param(name=arg0, min=1e-6, max=np.inf, start=1.0)
+        elif isinstance(arg0, (int, float)):
+            name = _detect_varname(depth=2)
+            start = float(arg0)
+            if start <= 0:
+                start = 1.0
+            return _Param(name=name, min=1e-6, max=np.inf, start=start)
+        else:
+            raise TypeError(f"Param.positive expects str or number, got {type(arg0).__name__}")
 
-def index(*args: int) -> Param:
-    """Shortcut for creating an INDEX parameter with ``range(*args)``."""
-    return Param(range=range(*args) if args else None, kind=Param.index)
+    def __repr__(self) -> str:
+        return "Param.positive"
 
-INDEX: Param = index() # default INDEX parameter.
+
+class _NegativeBuilder:
+    """Builder for negative params: Param.negative('name') or Param.negative(start)"""
+    def __call__(self, arg0: str | float | None = None) -> _Param:
+        if arg0 is None:
+            name = _detect_varname(depth=2)
+            return _Param(name=name, min=-np.inf, max=-1e-6, start=-1.0)
+        elif isinstance(arg0, str):
+            return _Param(name=arg0, min=-np.inf, max=-1e-6, start=-1.0)
+        elif isinstance(arg0, (int, float)):
+            name = _detect_varname(depth=2)
+            start = float(arg0)
+            if start >= 0:
+                start = -1.0
+            return _Param(name=name, min=-np.inf, max=-1e-6, start=start)
+        else:
+            raise TypeError(f"Param.negative expects str or number, got {type(arg0).__name__}")
+
+    def __repr__(self) -> str:
+        return "Param.negative"
+
+
+class _UnitBuilder:
+    """Builder for unit [0,1] params: Param.unit('name') or Param.unit(start)"""
+    def __call__(self, arg0: str | float | None = None) -> _Param:
+        if arg0 is None:
+            name = _detect_varname(depth=2)
+            return _Param(name=name, min=0, max=1, start=0.5)
+        elif isinstance(arg0, str):
+            return _Param(name=arg0, min=0, max=1, start=0.5)
+        elif isinstance(arg0, (int, float)):
+            name = _detect_varname(depth=2)
+            start = float(arg0)
+            if start < 0:
+                start = 0.0
+            if start > 1:
+                start = 1.0
+            return _Param(name=name, min=0, max=1, start=start)
+        else:
+            raise TypeError(f"Param.unit expects str or number, got {type(arg0).__name__}")
+
+    def __repr__(self) -> str:
+        return "Param.unit"
+
+
+Param.positive = _PositiveBuilder()
+Param.negative = _NegativeBuilder()
+Param.unit = _UnitBuilder()
+
+
+# -----------------------------------------------------------------------------
+#   Module-level helpers
+# -----------------------------------------------------------------------------
+
+INPUT: _Param = _Param(kind=ParamKind.INPUT)
+
+def index(*args: int) -> _Param:
+    """Create an INDEX parameter with range(*args)."""
+    return _Param(range=range(*args) if args else None, kind=ParamKind.INDEX)
+
+INDEX: _Param = index()

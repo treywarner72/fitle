@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import numpy as np
 from .model import Model, INPUT, const, indecise, Reduction
-from .param import Param, index
+from .param import Param, _Param, index
 import math
 
 SQRT2PI = np.sqrt(2 * np.pi)
@@ -42,16 +42,16 @@ def _erf(x):
 _erf.__name__ = 'erf'
 
 
-def gaussian(mu: Param | float | None = None, sigma: Param | float | None = None) -> Model:
+def gaussian(mu: _Param | float | None = None, sigma: _Param | float | None = None) -> Model:
     """Create a Gaussian (normal) probability density function.
 
     Returns the normalized PDF: ``(1 / (sigma * sqrt(2*pi))) * np.exp(-0.5 * ((x - mu) / sigma)^2)``
 
     Parameters
     ----------
-    mu : Param | float | None, optional
+    mu : _Param | float | None, optional
         Mean of the distribution. If None, creates ``Param("mu")``.
-    sigma : Param | float | None, optional
+    sigma : _Param | float | None, optional
         Standard deviation. If None, creates ``Param.positive("sigma")``.
 
     Returns
@@ -72,14 +72,14 @@ def gaussian(mu: Param | float | None = None, sigma: Param | float | None = None
     return norm * Model(np.exp, [arg])
 
 
-def exponential(tau: Param | float | None = None) -> Model:
+def exponential(tau: _Param | float | None = None) -> Model:
     """Create an exponential probability density function.
 
     Returns the normalized PDF: ``(1 / tau) * np.exp(-x / tau)``
 
     Parameters
     ----------
-    tau : Param | float | None, optional
+    tau : _Param | float | None, optional
         Decay constant (mean lifetime). If None, creates ``Param.positive("tau")``.
 
     Returns
@@ -108,7 +108,7 @@ def crystalball(alpha, n, mu, sigma):
 
     # Warn about extreme parameter values that may cause numerical issues
     def _check_param(p, name, min_val, max_val):
-        if isinstance(p, Param):
+        if isinstance(p, _Param):
             val = p.start if p.start is not None else p.value
             if val is not None and (val < min_val or val > max_val):
                 warnings.warn(
@@ -146,10 +146,10 @@ def crystalball(alpha, n, mu, sigma):
 def convolve(
     d_x: np.ndarray,
     c: np.ndarray,
-    mass_mother: Param | float,
-    mu: Param | float,
-    sigma: Param | float,
-    idx: Param | None = None
+    mass_mother: _Param | float,
+    mu: _Param | float,
+    sigma: _Param | float,
+    idx: _Param | None = None
 ) -> Model:
     """Create a convolution of a kernel with coefficient weights.
 
@@ -162,11 +162,11 @@ def convolve(
         Center positions for each Gaussian component.
     c : ndarray
         Weights (coefficients) for each Gaussian component.
-    mass_mother : Param | float
+    mass_mother : _Param | float
         Reference mass for the shift.
-    mu : Param | float
+    mu : _Param | float
         Mean offset parameter.
-    sigma : Param | float
+    sigma : _Param | float
         Common width for all Gaussian components.
     idx : Param, optional
         INDEX parameter for the sum. If None, creates one automatically.

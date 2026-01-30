@@ -37,7 +37,7 @@ import numpy as np
 from numba import njit
 from collections import defaultdict, deque
 from .model import Model, Reduction
-from .param import Param, INPUT
+from .param import Param, _Param, INPUT
 
 # ---------------------------  Internal IR primitives  ---------------------------
 
@@ -48,7 +48,7 @@ class _IRNode:
     ----------
     expr : str
         RHS Python string that can be pasted into generated code.
-    deps : frozenset[Param]
+    deps : frozenset[_Param]
         Set of INDEX parameters this node depends on.
     users : int
         Number of times other IR nodes reference this node.
@@ -87,7 +87,7 @@ class _LoopIR:
     accums : list[tuple]
         Accumulator specifications ``(lhs, node, op)``.
     """
-    def __init__(self, index_param: Param):
+    def __init__(self, index_param: _Param):
         self.idx    = index_param
         self.body   = []              # list[_IRNode]   – executed in loop
         self.accums = []              # list[(lhs, node, op)]
@@ -124,7 +124,7 @@ class Compiler:
     def __init__(self, root: Model):
         self.root      = root
         self._node_map = {}           # Model instance   -> _IRNode
-        self._loops    = {}           # Param.index      -> _LoopIR
+        self._loops    = {}           # _Param.index      -> _LoopIR
         self._globals  = []           # list[_IRNode]    – deps == ∅
         self._idx_vars = {}
         self._final    = None         # _IRNode that yields return value
@@ -187,7 +187,7 @@ class Compiler:
             if isinstance(arg, Model):
                 self._check_no_kwargs(arg)
 
-    def _idx_var(self, idx_param: Param) -> str:
+    def _idx_var(self, idx_param: _Param) -> str:
         """Return the unique loop-variable name for an INDEX Param.
 
         Parameters
@@ -228,8 +228,8 @@ class Compiler:
             return node
 
         # ----- LEAF CASES ------------------------------------------------
-        if isinstance(model, Param):
-            if model.kind == Param.theta:
+        if isinstance(model, _Param):
+            if model.kind == _Param.theta:
                 def param_index(lst, target):
                     for i, item in enumerate(lst):
                         if item == target:
@@ -239,7 +239,7 @@ class Compiler:
                 node = _IRNode(f"theta[{idx}]", frozenset())
             elif model is INPUT:
                 node = _IRNode("x", frozenset())
-            elif model.kind == Param.index:
+            elif model.kind == _Param.index:
                 # Leaf that will be replaced by the loop variable.
                 var = self._idx_var(model)
                 node = _IRNode(var, frozenset({model}))   # depends on its own index
