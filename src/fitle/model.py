@@ -80,20 +80,34 @@ class Model:
         self.args = args
         self.memory = {}
 
-    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+    def __array_ufunc__(self, ufunc, method, *inputs, **ufunc_kwargs):
         """Handle numpy ufuncs like np.exp, np.sin, np.add, etc."""
         if method != '__call__':
             return NotImplemented
 
-        def inner(*inner_args):
-            return ufunc(*inner_args, **kwargs)
+        # Numba can't handle **kwargs - only include if non-empty
+        if ufunc_kwargs:
+            def inner(*inner_args):
+                return ufunc(*inner_args, **ufunc_kwargs)
+            inner._has_kwargs = True
+            inner._kwargs_info = tuple(ufunc_kwargs.keys())
+        else:
+            def inner(*inner_args):
+                return ufunc(*inner_args)
         inner.__name__ = ufunc.__name__
         return Model(inner, list(inputs))
 
     def __array_function__(self, func, types, args, kwargs):
         """Handle numpy functions like np.dot, np.matmul, np.sum, etc."""
-        def inner(*inner_args, **inner_kwargs):
-            return func(*inner_args, **inner_kwargs)
+        # Numba can't handle **kwargs - only include if non-empty
+        if kwargs:
+            def inner(*inner_args):
+                return func(*inner_args, **kwargs)
+            inner._has_kwargs = True
+            inner._kwargs_info = tuple(kwargs.keys())
+        else:
+            def inner(*inner_args):
+                return func(*inner_args)
         inner.__name__ = func.__name__
         return Model(inner, list(args))
 

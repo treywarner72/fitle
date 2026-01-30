@@ -145,7 +145,14 @@ class Compiler:
         callable
             A Numba ``@njit`` compiled function with signature
             ``compiled(x, indices, theta) -> result``.
+
+        Raises
+        ------
+        TypeError
+            If the model contains numpy functions called with keyword
+            arguments, which Numba cannot compile.
         """
+        self._check_no_kwargs(self.root)
         self._build_dag(self.root)
         self._partition_nodes()
         self._allocate_temps()
@@ -153,6 +160,32 @@ class Compiler:
         self.code = source
         exec(source, ns)
         return njit(ns["compiled"])
+
+    def _check_no_kwargs(self, model) -> None:
+        """Check that no functions in the tree use kwargs.
+
+        Raises TypeError if any function was created with keyword arguments
+        from numpy's dispatch protocol, since Numba cannot compile these.
+        """
+        if not isinstance(model, Model):
+            return
+
+        fn = model.fn
+        if getattr(fn, '_has_kwargs', False):
+            kwargs_str = ', '.join(getattr(fn, '_kwargs_info', ()))
+            raise TypeError(
+                f"Cannot compile model: numpy function '{fn.__name__}' was called "
+                f"with keyword arguments ({kwargs_str}).\n"
+                f"  Numba does not support keyword arguments in compiled functions.\n"
+                f"  Either:\n"
+                f"    - Use positional arguments instead\n"
+                f"    - Use an equivalent expression (e.g., np.where instead of where=)\n"
+                f"    - Skip compilation and use Python evaluation"
+            )
+
+        for arg in model.args:
+            if isinstance(arg, Model):
+                self._check_no_kwargs(arg)
 
     def _idx_var(self, idx_param: Param) -> str:
         """Return the unique loop-variable name for an INDEX Param.

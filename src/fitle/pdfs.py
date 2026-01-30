@@ -33,9 +33,14 @@ import numpy as np
 from .model import Model, INPUT, const, indecise, Reduction
 from .param import Param, index
 from .mnp import exp, where, sum, log
-import scipy
+import math
 
 SQRT2PI = np.sqrt(2 * np.pi)
+
+def _erf(x):
+    """Wrapper for math.erf that Numba can compile."""
+    return math.erf(x)
+_erf.__name__ = 'erf'
 
 
 def gaussian(mu: Param | float | None = None, sigma: Param | float | None = None) -> Model:
@@ -122,7 +127,7 @@ def crystalball(alpha, n, mu, sigma):
     pref      = n / alpha     # n/|α|
     B         = pref - alpha  # n/|α| - |α|
     C = n / (alpha * (n - 1)) * exp(-0.5 * alpha**2)
-    D = np.sqrt(0.5*np.pi) * (1 + Model(lambda a: scipy.special.erf(a), [alpha/np.sqrt(2)]))
+    D = np.sqrt(0.5*np.pi) * (1 + Model(_erf, [alpha/np.sqrt(2)]))
 
     N = 1.0 / (sigma * (C + D))
 
