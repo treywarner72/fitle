@@ -166,42 +166,42 @@ def convolve(
     mass_mother: _Param | float,
     mu: _Param | float,
     sigma: _Param | float,
-    bin_width: float = 1.0,
     idx: _Param | None = None
 ) -> Model:
     """Create a convolution of a kernel with coefficient weights.
 
     Computes a weighted sum of Gaussians at different centers,
     useful for modeling resolution effects or detector response.
+    Returns a normalized PDF that integrates to 1.
 
     Parameters
     ----------
     d_x : ndarray
         Center positions for each Gaussian component.
     c : ndarray
-        Weights (coefficients) for each Gaussian component.
+        Weights (coefficients) for each Gaussian component. Will be
+        normalized to sum to 1 internally.
     mass_mother : _Param | float
         Reference mass for the shift.
     mu : _Param | float
         Mean offset parameter.
     sigma : _Param | float
         Common width for all Gaussian components.
-    bin_width : float, default 1.0
-        Bin width for normalization. Set to match your fitting data's
-        bin width for proper PDF normalization.
     idx : Param, optional
         INDEX parameter for the sum. If None, creates one automatically.
 
     Returns
     -------
     Model
-        A normalized convolution model.
+        A normalized PDF model (integrates to 1).
     """
     i = index(len(c)) if not idx else idx
-    w = _indecise(const(c), i)
+    # Pre-normalize weights to sum to 1
+    c_normalized = np.asarray(c) / np.sum(c)
+    w = _indecise(const(c_normalized), i)
     centers = _indecise(const(d_x), i)
     shifted_x = INPUT + mass_mother - mu
     g = gaussian(centers, sigma) % shifted_x
     weighted = w * g
     ret = Reduction(weighted, i)
-    return ret / (bin_width * np.sum(ret))
+    return ret

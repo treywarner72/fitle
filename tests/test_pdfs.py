@@ -263,8 +263,8 @@ class TestConvolve:
         x = np.linspace(-2, 5, 1000)
         dx = x[1] - x[0]
 
-        # Pass bin_width matching evaluation grid for proper normalization
-        model = convolve(centers, counts, mass_mother, mu, sigma, bin_width=dx)
+        # Convolve returns a normalized PDF
+        model = convolve(centers, counts, mass_mother, mu, sigma)
 
         result = model(x)
         integral = np.sum(result) * dx
