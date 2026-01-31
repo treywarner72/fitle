@@ -170,7 +170,7 @@ class FitResult:
                 f"Model has no base expression stored.\n"
                 f"  This usually means the Cost was not applied correctly."
             )
-        self.predict = model.memory['base'].freeze() * const(self.bin_widths)
+        self.predict = model.memory['base'].freeze() * const(self.bin_width)
         self.x = self.cost.x()
         self.y = self.cost.y() if self.cost.y is not None else None
         self.fval = m.fval
