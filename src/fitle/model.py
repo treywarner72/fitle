@@ -948,7 +948,7 @@ def _indecise(obj: Any, index: _Param = INDEX) -> Model:
     if not isinstance(obj, typing.Hashable):
         obj = const(obj)
     fn = lambda arr, i: arr[int(i)]
-    fn.__name__ = 'indecise'
+    fn.__name__ = '_indecise'
     return Model(fn, [obj, index])
 
 
