@@ -30,7 +30,7 @@ Example::
 from __future__ import annotations
 
 import numpy as np
-from .model import Model, INPUT, const, indecise, Reduction
+from .model import Model, INPUT, const, _indecise, Reduction
 from .param import Param, _Param, index
 import math
 
@@ -72,15 +72,28 @@ def gaussian(mu: _Param | float | None = None, sigma: _Param | float | None = No
     return norm * Model(np.exp, [arg])
 
 
-def exponential(tau: _Param | float | None = None) -> Model:
+def exponential(
+    tau: _Param | float | None = None,
+    start: float | None = None,
+    end: float | None = None
+) -> Model:
     """Create an exponential probability density function.
 
-    Returns the normalized PDF: ``(1 / tau) * np.exp(-x / tau)``
+    If start and end are provided, returns a truncated exponential PDF
+    normalized over [start, end]:
+        ``(1/tau) * exp(-(x-start)/tau) / (1 - exp(-(end-start)/tau))``
+
+    Otherwise returns the standard exponential PDF over [0, inf):
+        ``(1/tau) * exp(-x/tau)``
 
     Parameters
     ----------
     tau : _Param | float | None, optional
         Decay constant (mean lifetime). If None, creates ``Param.positive("tau")``.
+    start : float, optional
+        Left boundary for truncated exponential.
+    end : float, optional
+        Right boundary for truncated exponential.
 
     Returns
     -------
@@ -89,10 +102,13 @@ def exponential(tau: _Param | float | None = None) -> Model:
 
     Examples
     --------
-    >>> e = exponential()  # Auto-creates tau parameter
-    >>> e = exponential(Param.positive("lifetime")(2.5))
+    >>> e = exponential()  # Standard exponential over [0, inf)
+    >>> e = exponential(tau=+Param, start=0, end=10)  # Truncated
     """
     tau = tau if tau is not None else Param.positive('tau')
+    if start is not None and end is not None:
+        norm = 1 - np.exp(-(end - start) / tau)
+        return (1 / tau) * np.exp(-(INPUT - start) / tau) / norm
     return (1 / tau) * np.exp(-INPUT / tau)
 
 def crystalball(alpha, n, mu, sigma):
@@ -135,8 +151,9 @@ def crystalball(alpha, n, mu, sigma):
 
     # --- tail: computed fully in log-space ---
     # logA = n*np.log(n/|α|) - α²/2
+    # Clamp B - t to avoid log of negative values (np.where evaluates both branches)
     logA      = n * np.log(pref) - 0.5 * alpha**2
-    log_tail  = logA - n * np.log(B - t)
+    log_tail  = logA - n * np.log(np.maximum(B - t, 1e-10))
     tail      = np.exp(log_tail)
 
     # --- piecewise: Gaussian for t > -α, tail otherwise ---
@@ -149,6 +166,7 @@ def convolve(
     mass_mother: _Param | float,
     mu: _Param | float,
     sigma: _Param | float,
+    bin_width: float = 1.0,
     idx: _Param | None = None
 ) -> Model:
     """Create a convolution of a kernel with coefficient weights.
@@ -168,6 +186,9 @@ def convolve(
         Mean offset parameter.
     sigma : _Param | float
         Common width for all Gaussian components.
+    bin_width : float, default 1.0
+        Bin width for normalization. Set to match your fitting data's
+        bin width for proper PDF normalization.
     idx : Param, optional
         INDEX parameter for the sum. If None, creates one automatically.
 
@@ -177,11 +198,10 @@ def convolve(
         A normalized convolution model.
     """
     i = index(len(c)) if not idx else idx
-    w = indecise(const(c), i)
-    centers = indecise(const(d_x), i)
+    w = _indecise(const(c), i)
+    centers = _indecise(const(d_x), i)
     shifted_x = INPUT + mass_mother - mu
     g = gaussian(centers, sigma) % shifted_x
     weighted = w * g
     ret = Reduction(weighted, i)
-    Xi = indecise(INPUT)
-    return ret / ((Xi[1]-Xi[0]) * np.sum(ret))
+    return ret / (bin_width * np.sum(ret))
