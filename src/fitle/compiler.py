@@ -576,12 +576,19 @@ class Compiler:
         self._hoisted_fns[name] = njit(fn)
         return name
 
-def _compile(self) -> Model:
+def _compile(self, eager: bool = True) -> Model:
     """Compile this Model for fast evaluation using Numba.
 
     Checks the global cache for an existing compiled function with
     the same structure. If not found, compiles and caches the result.
     Uses LRU eviction when the cache is full.
+
+    Parameters
+    ----------
+    eager : bool, default True
+        If True, trigger LLVM compilation immediately by calling the
+        function once. This makes the first real call fast but adds
+        upfront cost. Set to False for lazy JIT behavior.
 
     Returns
     -------
@@ -599,8 +606,29 @@ def _compile(self) -> Model:
         while len(Model._compiled_cache) >= Model._cache_limit:
             Model._compiled_cache.popitem(last=False)
         c = Compiler(self)
-        Model._compiled_cache[current_hash] = c.compile()
+        compiled_fn = c.compile()
+        Model._compiled_cache[current_hash] = compiled_fn
         self.code = c.code
+
+        # Trigger LLVM compilation by calling once with dummy values
+        if eager:
+            params = self.params
+            theta = np.array([p.value for p in params]) if params else None
+
+            # Check if model needs INPUT
+            free = self.free
+            needs_input = any(p.kind == _Param.input for p in free)
+            x = np.array([0.0]) if needs_input else None
+
+            # Check for INDEX params
+            index_params = [p for p in free if p.kind == _Param.index]
+            indices = [0] * len(index_params) if index_params else None
+
+            try:
+                compiled_fn(x, indices, theta)
+            except Exception:
+                pass  # Ignore errors during warmup (e.g., domain errors)
+
     return self
 
 
