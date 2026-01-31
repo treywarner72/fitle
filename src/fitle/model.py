@@ -151,6 +151,10 @@ class Model:
     def params(self):
         """A list of all the THETA params that act on the model.
         """
+        # Return cached params if available (models are effectively immutable)
+        if hasattr(self, '_cached_params'):
+            return self._cached_params
+
         flat = []
         seen = set()
 
@@ -169,12 +173,17 @@ class Model:
                     flat.append(m)
 
         walk(self)
+        self._cached_params = flat
         return flat
 
     @property
     def free(self):
         """A list of all the free params, which are INPUT and INDEX that act on the model.
         """
+        # Return cached free params if available (models are effectively immutable)
+        if hasattr(self, '_cached_free'):
+            return self._cached_free
+
         flat = []
         seen = set()
 
@@ -199,11 +208,15 @@ class Model:
                     flat.append(m)
 
         walk(self)
+        self._cached_free = flat
         return flat
 
     def __hash__(self):
         """Two equal-hashed models may have different parameters, but if you use the same scalars for those parameters, they will give the same output.
         """
+        # Return cached hash if available (models are effectively immutable)
+        if hasattr(self, '_cached_hash'):
+            return self._cached_hash
 
         def walk(m):
             if isinstance(m, _Param):
@@ -243,7 +256,8 @@ class Model:
                     return ("const", m)
                 except TypeError:
                     return ("unhashable", type(m).__name__)
-        return hash(walk(self))
+        self._cached_hash = hash(walk(self))
+        return self._cached_hash
 
     def __eq__(self, other):
         if self is other:

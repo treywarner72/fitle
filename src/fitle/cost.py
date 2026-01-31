@@ -299,10 +299,13 @@ class Cost:
             raise ValueError("For binned_nll, provide either 'data' and 'bins' (and optional 'range') or 'x', 'y', and 'bin_widths'.")
 
         # Scale model predictions by bin width
-        cost_instance.fcn = lambda model: 2 * np.sum(
-            (model % cost_instance.x) * cost_instance.bin_widths -
-            cost_instance.y * np.log((model % cost_instance.x) * cost_instance.bin_widths)
-        )
+        # Use helper to avoid computing (model % x) twice
+        def _binned_nll_cost(model):
+            pred = model % cost_instance.x
+            scaled = pred * cost_instance.bin_widths
+            return 2 * np.sum(scaled - cost_instance.y * np.log(scaled))
+
+        cost_instance.fcn = _binned_nll_cost
         return cost_instance
 
 def _bin(

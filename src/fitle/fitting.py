@@ -29,8 +29,76 @@ from numpy.typing import NDArray
 import iminuit
 import warnings
 from .model import Model, const
-from .param import Param
+from .param import Param, _Param
 import matplotlib.pyplot as plt
+
+
+class _FittingContext:
+    """Optimized context for repeated model evaluation during fitting.
+
+    Pre-computes and caches everything needed for fast evaluation,
+    eliminating per-iteration overhead from hash lookups, property
+    walks, and array allocations.
+    """
+
+    def __init__(self, model: Model, use_numba: bool = True):
+        """Initialize the fitting context.
+
+        Parameters
+        ----------
+        model : Model
+            The model to prepare for fitting. Must be compiled if use_numba=True.
+        use_numba : bool
+            Whether to use the compiled Numba function.
+        """
+        self.params = model.params  # Cache once (now also cached in Model)
+        self.n_params = len(self.params)
+        self.theta = np.empty(self.n_params, dtype=np.float64)  # Reusable buffer
+        self.use_numba = use_numba
+        self._model = model
+
+        if use_numba:
+            # Pre-compute hash and get compiled function
+            model_hash = hash(model)
+            if model_hash not in Model._compiled_cache:
+                raise ValueError("Model must be compiled before creating _FittingContext")
+            self._compiled_fn = Model._compiled_cache[model_hash]
+
+            # Pre-compute index params
+            self._index_params = [p for p in model.free if p.kind == _Param.index]
+            self._has_indices = bool(self._index_params)
+        else:
+            self._compiled_fn = None
+            self._index_params = []
+            self._has_indices = False
+
+    def set_and_eval(self, *theta_values, index_map=None):
+        """Set params and evaluate in one call.
+
+        Parameters
+        ----------
+        *theta_values : float
+            Parameter values to set.
+        index_map : dict, optional
+            Mapping of INDEX params to values.
+
+        Returns
+        -------
+        result
+            The model evaluation result.
+        """
+        # Set parameter values and fill theta buffer
+        for i, v in enumerate(theta_values):
+            self.params[i].value = v
+            self.theta[i] = v
+
+        if self.use_numba:
+            index_list = None
+            if self._has_indices and index_map:
+                index_list = [index_map[p] for p in self._index_params]
+            return self._compiled_fn(None, index_list, self.theta)
+        else:
+            return self._model.eval_py(None, index_map or {})
 
 
 class FitResult:
@@ -289,13 +357,14 @@ def fit(
     params = model.params
     if not params:
         raise ValueError("Model has no parameters to fit.")
-    use_numba = numba  # Capture for closures
+
+    # Create optimized fitting contexts for fast evaluation
+    ctx = _FittingContext(model, use_numba=numba)
+    grad_ctx = _FittingContext(grad_model, use_numba=numba) if grad and grad_model else None
 
     def loss_fn(*theta):
-        for p, v in zip(params, theta):
-            p.value = v
         try:
-            return model.eval(None, {}, numba=use_numba)
+            return ctx.set_and_eval(*theta)
         except Exception as e:
             param_info = ", ".join(f"{p.name}={v:.4g}" for p, v in zip(params, theta))
             raise RuntimeError(
@@ -306,10 +375,8 @@ def fit(
             ) from e
 
     def grad_fn(*theta):
-        for p, v in zip(params, theta):
-            p.value = v
         try:
-            return grad_model.eval(None, {}, numba=use_numba)
+            return grad_ctx.set_and_eval(*theta)
         except Exception as e:
             param_info = ", ".join(f"{p.name}={v:.4g}" for p, v in zip(params, theta))
             raise RuntimeError(
@@ -321,7 +388,7 @@ def fit(
     start = [p.start for p in params]
     bounds = [(p.min, p.max) for p in params]
 
-    m = iminuit.Minuit(loss_fn, *start, grad=grad_fn if grad else None, **options)
+    m = iminuit.Minuit(loss_fn, *start, grad=grad_fn if grad_ctx else None, **options)
     m.limits = bounds
     m.migrad(ncall)
 
