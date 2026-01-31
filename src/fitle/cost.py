@@ -100,6 +100,13 @@ class Cost:
         -------
         Model
             A new Model that computes the cost when evaluated.
+
+        Note
+        ----
+        The cost model preserves INPUT in its structure rather than
+        substituting data. This enables compilation reuse across different
+        datasets. The data is stored in model.memory['_eval_x'] and passed
+        at evaluation time.
         """
         # Ensure model broadcasts with data by adding INPUT dependency if missing
         if INPUT not in model.free:
@@ -107,6 +114,8 @@ class Cost:
         ret = self.fcn(model)
         ret.memory['base'] = model
         ret.memory['cost'] = self
+        # Store raw data for evaluation (not const-wrapped)
+        ret.memory['_eval_x'] = self.x() if hasattr(self.x, '__call__') else self.x
         return ret
 
     @classmethod
@@ -126,9 +135,15 @@ class Cost:
         -------
         Cost
             A Cost instance configured for MSE.
+
+        Note
+        ----
+        The model's INPUT is preserved (not substituted with data).
+        Data is passed at evaluation time for compilation reuse.
         """
         cost_instance = cls(x, y)
-        cost_instance.fcn = lambda model: np.sum((cost_instance.y - model % cost_instance.x)**2)
+        # Keep INPUT in model structure - y is embedded as constant
+        cost_instance.fcn = lambda model: np.sum((cost_instance.y - model)**2)
         return cost_instance
 
     @classmethod
@@ -147,9 +162,16 @@ class Cost:
         -------
         Cost
             A Cost instance configured for unbinned NLL.
+
+        Note
+        ----
+        The model's INPUT is preserved (not substituted with data).
+        Data is passed at evaluation time for compilation reuse.
         """
         cost_instance = cls(x)
-        cost_instance.fcn = lambda model: np.sum(-np.log(model % cost_instance.x))
+        # Keep INPUT in model structure - data passed at eval time
+        # np.log and np.sum dispatch via __array_ufunc__/__array_function__
+        cost_instance.fcn = lambda model: np.sum(-np.log(model))
         return cost_instance
 
     NLL = unbinnedNLL  # Alias for convenience
@@ -234,16 +256,15 @@ class Cost:
         if np.any(y_data == 0):
             if zero_method == 'absolute':
                 y_star = const(np.where(y_data > 0, y_data, 1))
-                # Scale model predictions by bin width
+                # Keep INPUT - model evaluated at x passed at runtime
                 cost_instance.fcn = lambda model: np.sum(
-                    ((cost_instance.y - (model % cost_instance.x) * cost_instance.bin_widths) ** 2) / y_star
+                    ((cost_instance.y - model * cost_instance.bin_widths) ** 2) / y_star
                 )
                 return cost_instance
             raise ValueError("Chi2 calculation requires that all observed counts (y) be non-zero unless zero_method is set to 'absolute'.")
-        # Scale model predictions by bin width for proper chi-squared
-        cost_instance.fcn = lambda model: Model(
-            np.sum, 
-            [((cost_instance.y - (model % cost_instance.x) * cost_instance.bin_widths) ** 2) / cost_instance.y]
+        # Keep INPUT - model evaluated at x passed at runtime
+        cost_instance.fcn = lambda model: np.sum(
+            ((cost_instance.y - model * cost_instance.bin_widths) ** 2) / cost_instance.y
         )
         return cost_instance
 
@@ -298,11 +319,9 @@ class Cost:
         else:
             raise ValueError("For binned_nll, provide either 'data' and 'bins' (and optional 'range') or 'x', 'y', and 'bin_widths'.")
 
-        # Scale model predictions by bin width
-        # Use helper to avoid computing (model % x) twice
+        # Keep INPUT - model evaluated at x passed at runtime
         def _binned_nll_cost(model):
-            pred = model % cost_instance.x
-            scaled = pred * cost_instance.bin_widths
+            scaled = model * cost_instance.bin_widths
             return 2 * np.sum(scaled - cost_instance.y * np.log(scaled))
 
         cost_instance.fcn = _binned_nll_cost

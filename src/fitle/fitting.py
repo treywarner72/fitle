@@ -57,6 +57,9 @@ class _FittingContext:
         self.use_numba = use_numba
         self._model = model
 
+        # Get x data from model.memory if present (for cost models that preserve INPUT)
+        self._x_data = model.memory.get('_eval_x', None)
+
         if use_numba:
             # Pre-compute hash and get compiled function
             model_hash = hash(model)
@@ -96,9 +99,10 @@ class _FittingContext:
             index_list = None
             if self._has_indices and index_map:
                 index_list = [index_map[p] for p in self._index_params]
-            return self._compiled_fn(None, index_list, self.theta)
+            # Pass x_data (from cost model memory) to compiled function
+            return self._compiled_fn(self._x_data, index_list, self.theta)
         else:
-            return self._model.eval_py(None, index_map or {})
+            return self._model.eval_py(self._x_data, index_map or {})
 
 
 class FitResult:
@@ -326,6 +330,9 @@ def fit(
     if grad:
         try:
             grad_model = model.grad()
+            # Copy _eval_x from cost model to gradient for INPUT preservation
+            if '_eval_x' in model.memory:
+                grad_model.memory['_eval_x'] = model.memory['_eval_x']
         except Exception as e:
             warnings.warn(
                 f"Gradient computation failed, falling back to numerical gradients.\n"

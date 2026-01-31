@@ -442,12 +442,16 @@ class Model:
             return self % x
         if x is not None and not isinstance(x, np.ndarray):
             x = np.asarray(x)
+        # For cost models with preserved INPUT, use stored data if x not provided
         if INPUT in self.free and x is None:
-            raise TypeError(
-                f"Model requires input data but none provided.\n"
-                f"  Call as: model(x) where x is your data array.\n"
-                f"  Model: {self}"
-            )
+            if '_eval_x' in self.memory:
+                x = self.memory['_eval_x']
+            else:
+                raise TypeError(
+                    f"Model requires input data but none provided.\n"
+                    f"  Call as: model(x) where x is your data array.\n"
+                    f"  Model: {self}"
+                )
         if INPUT not in self.free and x is not None:
             raise TypeError(
                 f"Model doesn't accept input data.\n"
