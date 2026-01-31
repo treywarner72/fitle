@@ -40,6 +40,7 @@ __all__ = [
     "Model",
     "_indecise",
     "identity",
+    "model_sum",
     "vector",
     "formula",
 ]
@@ -1119,6 +1120,53 @@ def identity(val: Any) -> Model:
         A Model that evaluates to the input value.
     """
     return Model(iden, [val])
+
+
+def model_sum(models: list, N=None, weights: list | None = None) -> Model:
+    """Create a weighted sum of models with a total normalization.
+
+    Builds a mixture model of the form: N * (w1*m1 + w2*m2 + ... + (1-sum(w))*mN)
+    where the weights sum to 1 and N is the total normalization.
+
+    Parameters
+    ----------
+    models : list[Model]
+        List of component models to combine.
+    N : Param | float | None, optional
+        Total normalization parameter. If None, creates a new positive Param.
+        If a scalar, creates a positive Param with that starting value.
+    weights : list[Param] | None, optional
+        Weight parameters for each model except the last (which gets 1 - sum).
+        If None, creates unit-constrained Params named 'w'.
+
+    Returns
+    -------
+    Model
+        A composite model representing the weighted sum.
+
+    Examples
+    --------
+    >>> peak = model_sum([gaussian(mu1, s1), gaussian(mu2, s2)], N=1e6)
+    >>> # Creates: N * (w * gauss1 + (1-w) * gauss2)
+    """
+    from .param import Param
+
+    if N is None:
+        N = Param.positive('N')
+    elif np.isscalar(N):
+        N = Param.positive('N')(N)
+
+    if weights is None:
+        weights = [Param.unit('w') for _ in range(len(models) - 1)]
+
+    weighted = [
+        identity(weights[i] * models[i]) if i < len(models) - 1
+        else identity(models[i] * (1 - sum(weights)))
+        for i in range(len(models))
+    ]
+
+    return identity(N) * sum(weighted)
+
 
 def ensure_model(x):
     return x if isinstance(x, Model) else identity(x)
