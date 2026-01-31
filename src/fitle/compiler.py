@@ -207,6 +207,71 @@ class Compiler:
         return self._idx_vars.setdefault(idx_param,
                                          f"_i_{id(idx_param)}")
 
+    def _try_reuse_compiled(self, model: Model):
+        """Try to reuse a pre-compiled sub-model.
+
+        If the model is already in the compiled cache, generate a call
+        to the pre-compiled function instead of inlining its expression.
+        This can significantly reduce LLVM compilation time.
+
+        Parameters
+        ----------
+        model : Model
+            A sub-model to potentially reuse.
+
+        Returns
+        -------
+        _IRNode | None
+            An IR node representing the call to the pre-compiled function,
+            or None if the model cannot be reused.
+        """
+        # Check if model is in compiled cache
+        try:
+            model_hash = hash(model)
+        except Exception:
+            return None
+
+        if model_hash not in Model._compiled_cache:
+            return None
+
+        # Get sub-model's params and check they're all in parent's params
+        sub_params = model.params
+        if not sub_params:
+            # No params - just evaluate and hoist as constant
+            return None
+
+        # Check all sub-model params exist in parent
+        for p in sub_params:
+            if p not in self._param_to_idx:
+                return None  # Sub-model has params not in parent
+
+        # Check if sub-model has INDEX dependencies (complex case, skip for now)
+        if any(p.kind == _Param.index for p in model.free):
+            return None  # Skip models with INDEX for now
+
+        # Build theta indexing expression
+        indices = [self._param_to_idx[p] for p in sub_params]
+
+        # Check if indices are contiguous (can use slice)
+        if indices == list(range(indices[0], indices[0] + len(indices))):
+            theta_expr = f"theta[{indices[0]}:{indices[-1]+1}]"
+        else:
+            # Need explicit array construction
+            theta_expr = f"np.array([{', '.join(f'theta[{i}]' for i in indices)}])"
+
+        # Hoist the compiled function
+        compiled_fn = Model._compiled_cache[model_hash]
+        fn_name = f"_compiled_{id(model)}"
+        self._hoisted_fns[fn_name] = compiled_fn
+
+        # Generate the call expression
+        expr = f"{fn_name}(x, None, {theta_expr})"
+
+        node = _IRNode(expr, frozenset())  # No INDEX deps
+        node.model = model
+        node.is_leaf = False
+        return self._cache(model, node)
+
     # ------------------------------------------------------------------ #
     #  1.  DAG construction  (common-sub-expression detection)
     # ------------------------------------------------------------------ #
@@ -257,6 +322,13 @@ class Compiler:
                 node = _IRNode(repr(model), frozenset())
             node.is_leaf = True
             return self._cache(model, node)
+
+        # ----- REUSE PRE-COMPILED SUB-MODEL ------------------------------
+        # Check if this sub-model is already compiled and can be reused
+        if isinstance(model, Model) and model is not self.root:
+            reuse_node = self._try_reuse_compiled(model)
+            if reuse_node is not None:
+                return reuse_node
 
         # ----- REDUCTION -------------------------------------------------
         if isinstance(model, Reduction):
