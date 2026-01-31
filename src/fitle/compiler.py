@@ -32,7 +32,7 @@ Where:
 """
 from __future__ import annotations
 
-import types, textwrap, operator
+import types, textwrap, operator, re, itertools
 import numpy as np
 from numba import njit
 from collections import defaultdict, deque
@@ -133,7 +133,10 @@ class Compiler:
         self._final    = None         # _IRNode that yields return value
         self._hoisted_consts: dict = {}
         self._hoisted_fns   : dict = {}
+        self._fn_to_name    : dict = {}  # id(fn) -> name for O(1) lookup
         self._param_to_idx = {p: i for i, p in enumerate(root.params)}
+        self._alias_pattern = None    # compiled regex for alias substitution
+        self._alias_map_id = None     # id of last alias_map for cache invalidation
 
     # ------------------------------------------------------------------ #
     #  PUBLIC ENTRY
@@ -358,6 +361,20 @@ class Compiler:
         deps   = frozenset().union(*(a.deps for a in args))
         # build RHS string
         fn_name = getattr(fn, "__name__", None)
+
+        # Handle const() specially - hoist the value directly
+        if fn_name == "const" and len(args) == 0:
+            val = fn()  # Evaluate to get the constant value
+            if isinstance(val, np.ndarray):
+                cname = f"_arr_{id(val)}"
+                self._hoisted_consts[cname] = val
+                expr = cname
+            else:
+                expr = repr(val)
+            node = _IRNode(expr, frozenset())
+            node.is_leaf = True
+            return self._cache(model, node)
+
         if fn_name in {"add","radd","sub","rsub","mul","rmul",
                        "div","rdiv","truediv",
                        "pow","rpow"} and len(args) == 2:
@@ -369,8 +386,22 @@ class Compiler:
             expr = f"({a.expr} {op} {b.expr})"
         elif fn_name == "neg" and len(args) == 1:
             expr = f"-({args[0].expr})"
-        elif fn in {np.exp, np.sqrt, np.sum, np.dot}:
-            expr = f"np.{fn.__name__}(" + ", ".join(a.expr for a in args) + ")"
+        elif fn in {np.exp, np.sqrt, np.sum, np.dot} or fn_name in {
+                'exp', 'sqrt', 'sum', 'dot', 'log', 'log10', 'log2',
+                'sin', 'cos', 'tan', 'arcsin', 'arccos', 'arctan',
+                'sinh', 'cosh', 'tanh', 'abs', 'absolute',
+                'maximum', 'minimum', 'where', 'multiply', 'divide', 'add', 'subtract',
+                'power', 'greater', 'less', 'greater_equal', 'less_equal', 'equal', 'not_equal',
+                'gt', 'lt', 'ge', 'le', 'eq', 'ne',  # comparison operator names
+            }:
+            # Map short names to numpy function names
+            np_name = {'gt': 'greater', 'lt': 'less', 'ge': 'greater_equal',
+                       'le': 'less_equal', 'eq': 'equal', 'ne': 'not_equal'}.get(fn_name, fn_name)
+            expr = f"np.{np_name}(" + ", ".join(a.expr for a in args) + ")"
+        elif fn_name == "_indecise" and len(args) == 2:
+            # _indecise(arr, idx) → arr[int(idx)] - direct array indexing
+            arr, idx = args
+            expr = f"({arr.expr})[int({idx.expr})]"
         else:
             # fallback: hoist callable into a helper
             helper = self._hoist_fn(fn)
@@ -438,7 +469,8 @@ class Compiler:
         are skipped.
         """
         t_counter = 0
-        for node in self._globals + sum((b.body for b in self._loops.values()), []):
+        all_nodes = itertools.chain(self._globals, *(b.body for b in self._loops.values()))
+        for node in all_nodes:
             if (node.users >= 2 and
                 not getattr(node, "is_leaf", False) and
                 not getattr(node, "is_acc", False)) or node.is_red:
@@ -447,10 +479,22 @@ class Compiler:
 
 
     def _alias_rhs(self, rhs, alias_map):
-        """Replace any known sub-expression with its temp name."""
-        for original, temp in sorted(alias_map.items(), key=lambda kv: -len(kv[0])):
-            rhs = rhs.replace(original, temp)
-        return rhs
+        """Replace any known sub-expression with its temp name.
+
+        Uses compiled regex for O(m) single-pass replacement instead of
+        O(m * p) sequential .replace() calls.
+        """
+        if not alias_map:
+            return rhs
+        # Compile pattern once and cache it
+        if self._alias_pattern is None or self._alias_map_id != id(alias_map):
+            # Sort by length (longest first) to match longer patterns first
+            sorted_aliases = sorted(alias_map.keys(), key=len, reverse=True)
+            pattern = '|'.join(re.escape(a) for a in sorted_aliases)
+            self._alias_pattern = re.compile(pattern)
+            self._alias_map_id = id(alias_map)
+            self._alias_map_ref = alias_map
+        return self._alias_pattern.sub(lambda m: alias_map[m.group(0)], rhs)
 
     def _init_for_shape(self, obj, alias: dict) -> str:
         """
@@ -569,11 +613,13 @@ class Compiler:
         str
             The namespace key (e.g., ``_fn_0``) to reference this function.
         """
-        for name, f in self._hoisted_fns.items():
-            if f is fn:
-                return name
+        # O(1) lookup using reverse index
+        fn_id = id(fn)
+        if fn_id in self._fn_to_name:
+            return self._fn_to_name[fn_id]
         name = f"_fn_{len(self._hoisted_fns)}"
         self._hoisted_fns[name] = njit(fn)
+        self._fn_to_name[fn_id] = name
         return name
 
 def _compile(self, eager: bool = True) -> Model:
