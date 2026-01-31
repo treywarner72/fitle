@@ -1,0 +1,291 @@
+\section{Fitle}\label{apx:fitle}
+
+\subsection{Overview}
+\texttt{fitle} is a lightweight Python framework for building statistical models,
+compiling them into efficient machine code with
+\texttt{Numba}~\cite{lam2015numba}, and fitting to
+data using \texttt{iMinuit}~\cite{iminuit,iminuit2020}.
+\texttt{fitle} is available on \href{https://github.com/treywarner72/fitle}{github}.
+
+A typical workflow is:
+\begin{enumerate}
+  \item Define a \texttt{Model} by doing symbolic arithmetic on components and fitting parameters
+  \item Pipe the model into a cost function such as Negative Log Likelihood (NLL)
+   or $ \chi^2 $, along with the data to be modeled;
+  \item Minimize the cost function using the \texttt{fit()} method, which wraps
+  \texttt{iMinuit}.
+\end{enumerate}
+%% mds This can be done with concisely or descriptively depending on your purposes.
+\noindent
+The most important structure in the library is a \texttt{Model}
+that
+represents a mathematical expression which relates inputs (\texttt{INPUT)}, constants, and parameters (\texttt{Param}s).
+The user rarely needs to define a \texttt{Model} explicitly.
+Performing any arithmetic operation or function on a \texttt{Param} will return a \texttt{Model} representing that expression.
+Examples are provided below, after the API description.
+
+\subsection{API Reference}
+\begin{small}
+\begin{verbatim}
+# === Params ===
+# Shorthand with unary operators (auto-named from variable)
+a = ~Param                          # Unbounded param, auto-named 'a'
+sigma = +Param                      # Positive (>0), auto-named 'sigma'
+neg = -Param                        # Negative (<0), auto-named 'neg'
+
+# Explicit creation with chaining
+Param('name')                       # Named parameter
+Param(start)                        # Set starting value
+Param(min, max)                     # Set bounds
+Param('name')(start)(min, max)      # Chaining in any order
+
+# Positive param with start value
+sigma = (+Param)(2.5)               # Positive, start=2.5, auto-named
+
+# Factory methods
+Param.positive(name=None)           # Bounds (1e-6, inf), start=1
+Param.negative(name=None)           # Bounds (-inf, -1e-6), start=-1
+Param.unit(name=None)               # Bounds [0,1], start=0.5
+
+# Special params
+INPUT                               # Placeholder for input data (x)
+INDEX                               # Default index placeholder
+index(*args)                        # Create INDEX param with range(*args)
+
+# === Model Construction ===
+const(value)                        # Wrap constant as Model
+identity(val)                       # Wrap in identity function
+gaussian(mu=None, sigma=None)       # Gaussian PDF
+exponential(tau=None, start=None, end=None)
+                                    # Exponential PDF (truncated if start/end given)
+crystalball(alpha, n, mu, sigma)    # Crystal Ball PDF
+convolve(d_x, c, mass_mother, mu, sigma, bin_width=1.0)
+                                    # Discrete convolution
+
+# === Indexing ===
+model[INDEX]                        # Make model indexable by INDEX
+model[i]                            # Evaluate/substitute at index i
+const(arr)[INDEX]                   # Select element from array
+INPUT[0]                            # Select element 0 from input
+
+# === Model Properties ===
+Model.params                        # List of THETA parameters
+Model.free                          # List of free params (INPUT, INDEX)
+Model.components                    # Sub-models split at iden() boundaries
+Model.compiled                      # True if numba-compiled version exists
+
+# === Model Methods ===
+Model.__call__(x=None)              # Evaluate model; x required if INPUT free
+Model.__mod__(subs)                 # Substitute: model % {param: value}
+Model.__getitem__(map)              # Index substitution: model[i]
+Model.grad(wrt=None)                # Symbolic gradient w.r.t. params
+Model.simplify()                    # Algebraic simplification
+Model.shape()                       # Infer output shape
+Model.freeze()                      # Replace params with current values
+Model.copy()                        # Deep copy of model tree
+Model.compile()                     # JIT compile; stores in cache
+
+# === Reduction ===
+Reduction(model, index_param, op=operator.add)
+                                    # Reduce model over index with operator
+                                    # Example: sum over n bins
+
+# === Cost Functions ===
+Cost.MSE(x, y)                      # Mean squared error
+Cost.NLL(data)                      # Unbinned negative log-likelihood
+Cost.binnedNLL(data, bins, range)   # Binned NLL
+Cost.chi2(data, bins, range)        # Chi-squared (binned)
+Cost.chi2(x=centers, y=counts)      # Chi-squared from histogram
+Cost.bin_widths                     # Bin widths (if binned method)
+
+# === Fitting ===
+fit(model, grad=True, ncall=9999999, options={})
+                                    # Returns FitResult
+
+FitResult.fval                      # Best objective value
+FitResult.success                   # Convergence flag
+FitResult.values                    # Dict of {name: fitted_value}
+FitResult.errors                    # Dict of {name: error}
+FitResult.predict                   # Frozen model scaled by bin_widths
+FitResult.minimizer                 # Underlying iminuit.Minuit object
+\end{verbatim}
+\end{small}
+
+\subsection{Example: Linear Fit}
+
+First, we can define parameters using \texttt{Param}. The shorthand \texttt{+Param} creates a positive parameter that is automatically named from the variable it is assigned to. Calling a \texttt{Param} with two scalars sets its bounds, with one scalar sets its starting value, and with a string sets its name. This can be done in any order.
+We define a \texttt{Model} that represents the linear equation $y(x) = a\cdot x+b$, where $a > 0$ and $b$ is between $-5$ and $5$ with
+\begin{lstlisting}[language=Python]
+    from fitle import Param, INPUT, fit, Cost
+
+    a = +Param                       # Positive, auto-named 'a'
+    b = Param('b')(-5, 5)            # Bounded [-5,5], named 'b'
+
+    linear_model = a * INPUT + b
+\end{lstlisting}
+Here, \texttt{linear\_model} represents $y(x) = a\cdot x+b$ and \texttt{linear\_model(x)} returns the output of that with the starting values of the
+parameters.
+To fit this equation to data, we define a \texttt{Cost} instance with the data, where we assume two \texttt{ndarray}'s \texttt{data\_x} and \texttt{data\_y} and the method, which is Mean Squared Error (MSE).
+\begin{lstlisting}[language=Python]
+    import numpy as np
+
+    data_x = np.array([-2,-1,0,1,2])
+    data_y = np.array([0,0,1,1,2])
+
+    cost = Cost.MSE(data_x, data_y)
+\end{lstlisting}
+With the pipe operator, we create a \texttt{Model} that represents the cost of \texttt{linear\_model} with respect to the data and method.
+\begin{lstlisting}[language=Python]
+    model_cost = linear_model | cost
+    model_cost
+    # sum(([0 0 1 1 2] - (a=1 * [-2 -1  0  1  2] + b=0)) ** 2)
+\end{lstlisting}
+As seen above, \texttt{model\_cost} is a \texttt{Model} that represents the MSE of \texttt{linear_model} on the data and \texttt{model\_cost()} returns the cost metric with the starting values of \texttt{a} and \texttt{b}, as in
+\begin{lstlisting}[language=Python]
+    model_cost()
+    # 6.0
+\end{lstlisting}
+To fit, one can write
+\begin{lstlisting}[language=Python]
+    fit_result = fit(model_cost)
+    fit_result
+    # <<FitResult fval=0.300, success=True>
+    # a: 0.5015 $\pm$ 0.31
+    # b: 0.8039 $\pm$ 0.45
+\end{lstlisting}
+By default, this calculates the gradient of the cost with respect to \texttt{a} and \texttt{b}, and compiles both the cost function and its gradient using \texttt{numba} which is probably overkill for this simple model.
+Plotting the data and printing the fit results are easy:
+\begin{lstlisting}[language=Python]
+    import matplotlib.pyplot as plt
+
+    plt.plot(data_x, data_y)
+    plt.plot(data_x, linear_model(data_x))
+\end{lstlisting}
+\begin{center}
+\includegraphics[width=0.5\linewidth]{figs/linear_fit.png}
+\end{center}
+\begin{lstlisting}[language=Python]
+    print(a.value, a.error)
+    # 0.501474455674885 0.3104269246452036
+    print(fit_result.errors)
+    # {'a': 0.3104269246452036, 'b': 0.44663075536333074}
+\end{lstlisting}
+This works because the values of \texttt{a} and \texttt{b} are changed to
+those that minimize the cost function.
+The same fitting code may be written more concisely as:
+
+\begin{lstlisting}[language=Python]
+    fit_result = fit(+Param * INPUT + Param('b')(-5, 5) | Cost.MSE(data_x, data_y))
+\end{lstlisting}
+
+\subsection{Example: Double Gaussian Fit}
+
+The \texttt{gaussian} method in the library is functionally equivalent to
+
+\begin{lstlisting}[language=Python]
+    def gaussian(mu, sigma):
+        norm = 1 / (sigma * sqrt(2*pi))
+        arg = -0.5 * ((INPUT - mu) / sigma) ** 2
+        return norm * np.exp(arg)
+\end{lstlisting}
+The \texttt{exponential} is functionally equivalent to:
+
+\begin{lstlisting}[language=Python]
+    def exponential(tau, start=None, end=None):
+        if start is not None and end is not None:
+            norm = 1 - np.exp(-(end - start) / tau)
+            return (1 / tau) * np.exp(-(INPUT - start) / tau) / norm
+        return (1 / tau) * np.exp(-INPUT / tau)
+\end{lstlisting}
+To fit two peaks as double gaussian signals (with common mean values) and an exponential background as in Fig.~\ref{fig:dsmass}, one can write:
+
+\begin{lstlisting}[language=Python]
+    from fitle import Param, gaussian, exponential, fit, Cost
+
+    Dp_mass = Param(1850)
+    Ds_mass = Param(1950)
+    Dp_signal = +Param * gaussian(mu=Dp_mass) + +Param * gaussian(mu=Dp_mass)
+    Ds_signal = +Param * gaussian(mu=Ds_mass) + +Param * gaussian(mu=Ds_mass)
+    background = +Param * exponential(tau=+Param)
+
+    model = Dp_signal + Ds_signal + background
+\end{lstlisting}
+One can fit this \texttt{Model} to the $\chi^2$ of a histogram of 200 bins. Let \texttt{data} be an \texttt{ndarray} of mass values.
+
+\begin{lstlisting}[language=Python]
+    fit_result = fit(model | Cost.chi2(data, 200))
+    fit_result # inspect the fit
+\end{lstlisting}
+
+The data, the full fit projection, and projections of the fit components
+can be plotted separately.
+In the code snippet below,
+\texttt{x} represents the center of each bin in the histogram of \texttt{data}, and \texttt{y} the number of counts in a bin.
+
+\begin{lstlisting}[language=Python]
+    plt.plot(x, y)
+    plt.plot(x, model(x))
+    plt.plot(x, Dp_signal(x))
+    plt.plot(x, Ds_signal(x))
+    plt.plot(x, background(x))
+\end{lstlisting}
+
+\subsection{Crystal Ball Function}
+The Crystal Ball function combines a Gaussian core with a power-law tail:
+\begin{equation}
+f_{\rm CB}(x; \alpha,n,\mu,\sigma) = N \cdot
+\begin{cases}
+  A \left(B - \frac{x-\mu}{\sigma}\right)^{-n}, & \frac{x-\mu}{\sigma} < -\alpha, \\[6pt]
+  \exp\!\Big(-\tfrac{1}{2}\big(\tfrac{x-\mu}{\sigma}\big)^2\Big), & \frac{x-\mu}{\sigma} \ge -\alpha,
+\end{cases}
+\end{equation}
+The \texttt{fitle} code is functionally equivalent to:
+
+\begin{lstlisting}[language=Python]
+    def crystalball(alpha, n, mu, sigma):
+        n_over_alpha = n/alpha
+        exp = np.exp(-0.5*alpha ** 2)
+        A = (n_over_alpha)**n * exp
+        B = n_over_alpha - alpha
+        C = n_over_alpha/(n-1) * exp
+        D = np.sqrt(0.5*np.pi) * (1 + Model(erf, [alpha/np.sqrt(2)]))
+        N = 1/(sigma*(C + D))
+
+        z = (INPUT - mu)/sigma
+
+        return np.where(z > -alpha,
+                  N * np.exp(-0.5*z**2),
+                  N * A * (B - z)**-n
+                 )
+\end{lstlisting}
+Here we see the representation of conditions with \texttt{np.where(z > -alpha)}, and the base constructor for \texttt{Model} that takes a function and a list of arguments. It is also worth noting that wrapping \texttt{scipy.special.erf} in a lambda prevents differentiation and compilation.
+
+
+\subsection{Example: Convolutional Fit}
+The key method in this work was to convolve QED-based radiative predictions (\texttt{PHOTOS} simulations) with the approximate resolution function.
+\begin{equation}
+\label{eq:convolution_approx_2}
+(Q \star R)(x) \;\approx\;
+\sum_{n=0}^{n_{\mathrm{bins}} - 1}
+Q(x'_n)\, R\!\bigl(x - x'_n\bigr)\,\Delta x'_n
+\end{equation}
+where $Q$ denotes the radiative distribution and $R$ the resolution function (e.g.\ double Gaussian).
+In \texttt{fitle}, discrete convolution is implemented with the built-in \texttt{convolve} function:
+\begin{lstlisting}[language=Python]
+    from fitle import Param, convolve, fit, Cost
+
+    mu = Param('mu')(1968)
+    sigma = (+Param)(5)              # Positive param, start=5
+
+    model = +Param * convolve(
+        d_x=centers,                 # Bin centers from PHOTOS histogram
+        c=counts,                    # Bin counts from PHOTOS histogram
+        mass_mother=1968,            # Reference mass
+        mu=mu,                       # Mass offset parameter
+        sigma=sigma,                 # Resolution width
+        bin_width=1.0                # Bin width for normalization
+    )
+
+    fit_result = fit(model | Cost.chi2(data, 200))
+\end{lstlisting}
+The \texttt{convolve} function internally creates an index parameter over the histogram bins, weights each Gaussian component by the corresponding count, and sums them via a \texttt{Reduction}. The $\Delta x'_n$ term of Eq.~\ref{eq:convolution_approx_2} is already included in the \texttt{counts} of the PHOTOS histogram. The \texttt{bin\_width} parameter controls PDF normalization; set it to match your fitting data's bin width for proper normalization, or leave at the default if using a fitted normalization constant.

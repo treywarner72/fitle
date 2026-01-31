@@ -260,10 +260,12 @@ class TestConvolve:
         mu = Param('mu')(1)
         sigma = Param('sigma')(0.3)
 
-        model = convolve(centers, counts, mass_mother, mu, sigma)
-
         x = np.linspace(-2, 5, 1000)
         dx = x[1] - x[0]
+
+        # Pass bin_width matching evaluation grid for proper normalization
+        model = convolve(centers, counts, mass_mother, mu, sigma, bin_width=dx)
+
         result = model(x)
         integral = np.sum(result) * dx
 

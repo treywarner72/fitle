@@ -1,0 +1,45 @@
+\subsection{Example: Convolutional Fit}
+The key method in this work was to convolve QED-based radiative predictions (\texttt{PHOTOS} simulations) with the approximate resolution function.
+\begin{equation}
+\label{eq:convolution_approx_2}
+(Q \star R)(x) \;\approx\;
+\sum_{n=0}^{n_{\mathrm{bins}} - 1}
+Q(x'_n)\, R\!\bigl(x - x'_n\bigr)\,\Delta x'_n
+\end{equation}
+where $Q$ denotes the radiative distribution and $R$ the resolution function (e.g.\ double Gaussian).
+In \texttt{fitle}, discrete convolution can be implemented (efficiently) with indices and reductions:
+\begin{lstlisting}[language=Python]
+    from fitle import INPUT, INDEX, Param, gaussian, const, Reduction, index
+    import operator
+
+    def convolve(centers, counts, mass_mother, mu, sigma, bin_width=1.0):
+        n = index(len(counts))
+        Qx_n = const(counts)[n]
+        x_n = const(centers)[n]
+        shifted_x = INPUT + mass_mother - mu
+        R = gaussian(mu=x_n, sigma=sigma) % shifted_x
+        weighted = Qx_n * R
+        ret = Reduction(weighted, n, operator.add)
+        return ret / (bin_width * np.sum(ret))
+\end{lstlisting}
+In this function, \texttt{index} creates \texttt{n} which is an index parameter, a kind of \texttt{Param} that stores ranges.
+The indexing syntax \texttt{const(counts)[n]} creates a \texttt{Model} that represents the \texttt{n}th count of a histogram (such as a PHOTOS histogram); similarly \texttt{const(centers)[n]} selects the \texttt{n}th center.
+The \texttt{\%} operator replaces elements in a model with a map, but in the absence of a dictionary, as in the code above, we replace \texttt{INPUT} by default.
+The $\Delta x'_n$ term of Eq.~\ref{eq:convolution_approx_2} is not included explicitly as it is already included in the \texttt{counts} of the PHOTOS histogram.
+The \texttt{Reduction} of \texttt{weighted} over \texttt{n} using addition represents the summation in Eq.~\ref{eq:convolution_approx_2}.
+Finally, we normalize by dividing by the bin width and the sum of the result.
+
+This convolution is available as a built-in function:
+\begin{lstlisting}[language=Python]
+    from fitle import Param, convolve, fit, Cost
+
+    mu = Param('mu')(1968)
+    sigma = (+Param)(5)
+
+    model = +Param * convolve(
+        d_x=centers, c=counts, mass_mother=1968,
+        mu=mu, sigma=sigma, bin_width=1.0
+    )
+
+    fit_result = fit(model | Cost.chi2(data, 200))
+\end{lstlisting}

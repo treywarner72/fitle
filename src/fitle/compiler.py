@@ -69,7 +69,10 @@ class _IRNode:
         self.deps   = deps            # frozenset({index_param, …})
         self.users  = 0
         self.name   = None
-        self.is_red = None
+        self.is_red = False
+        self.is_leaf = False
+        self.is_acc = False
+        self.model  = None
 
 
 class _LoopIR:
@@ -130,6 +133,7 @@ class Compiler:
         self._final    = None         # _IRNode that yields return value
         self._hoisted_consts: dict = {}
         self._hoisted_fns   : dict = {}
+        self._param_to_idx = {p: i for i, p in enumerate(root.params)}
 
     # ------------------------------------------------------------------ #
     #  PUBLIC ENTRY
@@ -230,12 +234,7 @@ class Compiler:
         # ----- LEAF CASES ------------------------------------------------
         if isinstance(model, _Param):
             if model.kind == _Param.theta:
-                def param_index(lst, target):
-                    for i, item in enumerate(lst):
-                        if item == target:
-                            return i
-                    return -1
-                idx = param_index(self.root.params, model)
+                idx = self._param_to_idx.get(model, -1)
                 node = _IRNode(f"theta[{idx}]", frozenset())
             elif model is INPUT:
                 node = _IRNode("x", frozenset())
@@ -505,7 +504,7 @@ class Compiler:
         self._hoisted_fns[name] = njit(fn)
         return name
 
-def new_compile(self) -> Model:
+def _compile(self) -> Model:
     """Compile this Model for fast evaluation using Numba.
 
     Checks the global cache for an existing compiled function with
@@ -533,4 +532,4 @@ def new_compile(self) -> Model:
     return self
 
 
-Model.compile = new_compile
+Model.compile = _compile

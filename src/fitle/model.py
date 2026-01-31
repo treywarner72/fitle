@@ -26,7 +26,7 @@ import numpy as np
 from numba import njit, types
 from numba.typed import Dict
 import typing
-from .param import Param, _Param, INPUT, INDEX
+from .param import Param, _Param, INPUT, INDEX, ParamKind
 from collections.abc import Iterable, Callable
 from collections import defaultdict, OrderedDict
 import operator
@@ -38,7 +38,7 @@ import copy as _copy
 
 __all__ = [
     "Model",
-    "indecise",
+    "_indecise",
     "identity",
     "vector",
     "formula",
@@ -445,36 +445,58 @@ class Model:
             return self.eval(x, {})
         else:
             return self % x
-    def __getitem__(self, map: dict | int) -> Any:
-        """Access model values by index or evaluate with index map.
+    def __getitem__(self, key: dict | int | _Param) -> Any:
+        """Access model values by index or make model indexable.
 
-        Provides convenient syntax for working with INDEX parameters
-        or evaluating the model at specific index values.
+        Provides convenient syntax for working with INDEX parameters:
+        - ``model[index_param]``: Make model indexable by that INDEX param
+        - ``model[2]``: If model has no INDEX, wrap and evaluate at index 2
+        - ``model[{idx: 5}]``: Substitute specific index param with value
 
         Parameters
         ----------
-        map : dict | int
-            Either a dictionary mapping INDEX params to values, or an
-            integer value for the default INDEX parameter.
+        key : dict | int | _Param
+            An INDEX parameter, an integer index value, or a dictionary
+            mapping INDEX params to values.
 
         Returns
         -------
-        Any
-            If model has INPUT: returns a substituted Model.
-            Otherwise: returns the evaluated result at the given index.
+        Model | Any
+            A Model if INPUT is present or wrapping in _indecise,
+            otherwise the evaluated result.
 
         Examples
         --------
-        >>> model[0]  # Evaluate/substitute at index 0
-        >>> model[{my_index: 5}]  # Use specific index parameter
+        >>> arr = const([10, 20, 30])
+        >>> arr[INDEX]  # Make indexable by INDEX
+        >>> arr[1]      # Get element 1 (implicitly wraps in _indecise)
+        >>> indexed_model[{my_index: 5}]  # Substitute specific index
         """
+        # If key is an INDEX param, wrap in _indecise
+        if isinstance(key, _Param) and key.kind is ParamKind.INDEX:
+            return _indecise(self, key)
+
+        # Check if model already has INDEX dependencies
+        has_index = any(
+            isinstance(p, _Param) and p.kind is ParamKind.INDEX
+            for p in self.free
+        )
+
+        if isinstance(key, int) and not has_index:
+            # No INDEX params - wrap in _indecise with global INDEX first
+            indexed = _indecise(self, INDEX)
+            if INPUT in indexed.free:
+                return indexed % {INDEX: key}
+            return indexed.eval(None, {INDEX: key})
+
+        # Current behavior: substitute INDEX
         if INPUT in self.free:
-            if not isinstance(map, dict):
-                return self % {INDEX: map}
-            return self % map
-        if not isinstance(map, dict):
-                return self.eval(None, {INDEX: map})
-        return self.eval(None, map)
+            if not isinstance(key, dict):
+                return self % {INDEX: key}
+            return self % key
+        if not isinstance(key, dict):
+            return self.eval(None, {INDEX: key})
+        return self.eval(None, key)
 
     def copy_with_args(self, args: list) -> Model:
         """Create a shallow copy of this Model with new arguments.
@@ -810,7 +832,7 @@ class Reduction(Model):
     Examples
     --------
     >>> i = index(10)  # Loop from 0 to 9
-    >>> weights = indecise(const([...]), i)
+    >>> weights = _indecise(const([...]), i)
     >>> total = Reduction(weights * some_model, i)  # Sum over i
     """
     _supported_ops = {operator.add: 'add'}  # Only add is supported by compiler
@@ -885,7 +907,7 @@ def const(val: Any) -> Model:
     f.__name__ = f"const"
     return Model(f, [])
 
-def indecise(obj: Any, index: _Param = INDEX) -> Model:
+def _indecise(obj: Any, index: _Param = INDEX) -> Model:
     """Create a Model that selects from an array by index.
 
     Wraps an array (or constant) so that it can be indexed by
@@ -906,7 +928,7 @@ def indecise(obj: Any, index: _Param = INDEX) -> Model:
 
     Examples
     --------
-    >>> weights = indecise(const([0.3, 0.5, 0.2]), i)
+    >>> weights = _indecise(const([0.3, 0.5, 0.2]), i)
     >>> Reduction(weights * some_model, i)  # Sum weighted models
     """
     if not isinstance(obj, typing.Hashable):
@@ -927,7 +949,7 @@ def _grad_fn(model: Model | _Param | Any, wrt: _Param) -> Model | int:
 
     Recursively applies differentiation rules to build a new Model
     representing the derivative. Supports standard arithmetic operations,
-    exp, log, sqrt, sum, where, and indecise.
+    exp, log, sqrt, sum, where, and _indecise.
 
     Parameters
     ----------
@@ -1015,7 +1037,7 @@ def _grad_fn(model: Model | _Param | Any, wrt: _Param) -> Model | int:
         else:
             return exp * (base ** (exp - 1)) * df
 
-    if fn == 'indecise':
+    if fn == '_indecise':
         entries, index = model.args
         if isinstance(entries, (list, tuple)):
             # differentiate each entry
@@ -1045,7 +1067,7 @@ def _grad_fn(model: Model | _Param | Any, wrt: _Param) -> Model | int:
         return Model(np.where, [cond, dx, dy])
     raise ValueError(
         f"Cannot differentiate operation '{fn}'.\n"
-        f"  Supported: add, sub, mul, div, pow, neg, exp, sqrt, log, sum, where, indecise.\n"
+        f"  Supported: add, sub, mul, div, pow, neg, exp, sqrt, log, sum, where, _indecise.\n"
         f"  Consider using grad=False in fit() for numerical gradients."
     )
 
@@ -1255,8 +1277,8 @@ def shape(obj: Any) -> tuple | _Param:
     if isinstance(obj, Model):
         fn_name = getattr(obj.fn, '__name__', '')
 
-        # indecise always returns a scalar for a single index lookup
-        if fn_name == 'indecise':
+        # _indecise always returns a scalar for a single index lookup
+        if fn_name == '_indecise':
             return ()
 
         # 1. if expression explicitly depends on free X → vector

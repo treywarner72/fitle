@@ -3,7 +3,8 @@
 import pytest
 import numpy as np
 import operator
-from fitle import Param, INPUT, INDEX, index, Model, const, indecise, identity, Reduction
+from fitle import Param, INPUT, INDEX, index, Model, const, identity, Reduction
+from fitle.model import _indecise
 
 
 # =============================================================================
@@ -302,7 +303,7 @@ class TestModelProperties:
     def test_free_with_index(self):
         i = index(10)
         arr = const(np.arange(10))
-        m = indecise(arr, i)
+        m = _indecise(arr, i)
         assert i in m.free
 
     def test_components_no_identity(self):
@@ -511,27 +512,27 @@ class TestReduction:
     def test_reduction_sum(self):
         i = index(5)
         arr = const(np.array([1, 2, 3, 4, 5]))
-        elem = indecise(arr, i)
+        elem = _indecise(arr, i)
         r = Reduction(elem, i, operator.add)
         assert r() == 15
 
     def test_reduction_params(self):
         a = Param('a')
         i = index(3)
-        m = a * indecise(const(np.array([1, 2, 3])), i)
+        m = a * _indecise(const(np.array([1, 2, 3])), i)
         r = Reduction(m, i)
         assert a in r.params
 
     def test_reduction_free_excludes_index(self):
         i = index(3)
         arr = const(np.array([1, 2, 3]))
-        r = Reduction(indecise(arr, i), i)
+        r = Reduction(_indecise(arr, i), i)
         assert i not in r.free
 
     def test_reduction_with_input(self):
         i = index(3)
         weights = const(np.array([1, 1, 1]))
-        w = indecise(weights, i)
+        w = _indecise(weights, i)
         # Sum of (INPUT * weight) for each index
         m = w * INPUT
         r = Reduction(m, i)
@@ -539,53 +540,53 @@ class TestReduction:
 
 
 # =============================================================================
-# indecise
+# _indecise
 # =============================================================================
 
 class TestIndecise:
-    """Index selection with indecise."""
+    """Index selection with _indecise."""
 
-    def test_indecise_array(self):
+    def test__indecise_array(self):
         arr = const(np.array([10, 20, 30]))
         i = index(3)
-        m = indecise(arr, i)
+        m = _indecise(arr, i)
         # Evaluate at index 1
         result = m % {i: 1}
         assert result() == 20
 
-    def test_indecise_default_index(self):
+    def test__indecise_default_index(self):
         arr = const(np.array([10, 20, 30]))
-        m = indecise(arr)  # Uses default INDEX
+        m = _indecise(arr)  # Uses default INDEX
         result = m[1]  # Evaluates immediately when no INPUT
         assert result == 20
 
-    def test_indecise_with_input(self):
+    def test__indecise_with_input(self):
         # Index into INPUT array
-        m = indecise(INPUT)
+        m = _indecise(INPUT)
         result = m[0]
         arr = np.array([5, 10, 15])
         assert result(arr) == 5
 
-    def test_indecise_2d_matrix(self):
-        # Multidimensional indexing via chained indecise
+    def test__indecise_2d_matrix(self):
+        # Multidimensional indexing via chained _indecise
         A = np.array([[1, 2, 3],
                       [4, 5, 6],
                       [7, 8, 9]])
         i = index(3)
         j = index(3)
         # A[i][j]
-        elem = indecise(indecise(const(A), i), j)
+        elem = _indecise(_indecise(const(A), i), j)
         result = elem % {i: 1, j: 2}
         assert result() == 6  # A[1][2]
 
-    def test_indecise_2d_reduction(self):
+    def test__indecise_2d_reduction(self):
         # Sum all elements of 2D matrix
         A = np.array([[1, 2, 3],
                       [4, 5, 6],
                       [7, 8, 9]])
         i = index(3)
         j = index(3)
-        elem = indecise(indecise(const(A), i), j)
+        elem = _indecise(_indecise(const(A), i), j)
         sum_j = Reduction(elem, j, operator.add)
         sum_ij = Reduction(sum_j, i, operator.add)
         assert sum_ij() == 45
@@ -597,14 +598,14 @@ class TestIndexingBehavior:
     def test_getitem_with_global_INDEX(self):
         # m[1] works with global INDEX
         arr = const(np.array([10, 20, 30]))
-        m = indecise(arr, INDEX)  # Uses global INDEX
+        m = _indecise(arr, INDEX)  # Uses global INDEX
         assert m[1] == 20
 
     def test_getitem_with_custom_index_requires_dict(self):
         # m[1] with custom index needs dict syntax
         arr = const(np.array([10, 20, 30]))
         i = index(3)
-        m = indecise(arr, i)
+        m = _indecise(arr, i)
         # Dict syntax works
         result = m % {i: 1}
         assert result() == 20
@@ -613,21 +614,21 @@ class TestIndexingBehavior:
         # m[1] shorthand only substitutes global INDEX, not custom indices
         arr = const(np.array([10, 20, 30]))
         i = index(3)
-        m = indecise(arr, i)
+        m = _indecise(arr, i)
         # m[1] tries to substitute INDEX (not i), so fails
         with pytest.raises(KeyError):
             m[1]
 
     def test_getitem_with_INPUT_and_global_INDEX(self):
         # When INPUT present, m[1] returns substituted model
-        m = indecise(INPUT, INDEX)
+        m = _indecise(INPUT, INDEX)
         result = m[1]  # Substitutes INDEX, returns model
         assert result([5, 10, 15]) == 10
 
     def test_getitem_with_INPUT_and_custom_index(self):
         # Custom index with INPUT needs dict
         i = index(3)
-        m = indecise(INPUT, i)
+        m = _indecise(INPUT, i)
         result = m % {i: 1}  # Dict syntax
         assert result([5, 10, 15]) == 10
 

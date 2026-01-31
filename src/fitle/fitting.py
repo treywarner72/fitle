@@ -194,7 +194,9 @@ class FitResult:
         """
         if self.y is None:
             raise ValueError("dof() not available for unbinned fits")
-        return len(self.cost.x()) - len(self.values) 
+        # Count only free parameters (not fixed constants where min == max)
+        n_free = sum(1 for p in self.model.params if p.min != p.max)
+        return len(self.cost.x()) - n_free 
 
 def fit(
     model: Model,
@@ -285,6 +287,8 @@ def fit(
             numba = False
 
     params = model.params
+    if not params:
+        raise ValueError("Model has no parameters to fit.")
     use_numba = numba  # Capture for closures
 
     def loss_fn(*theta):

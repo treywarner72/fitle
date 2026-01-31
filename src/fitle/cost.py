@@ -230,17 +230,16 @@ class Cost:
         else:
             raise ValueError("For chi2, provide either 'data' and 'bins' (and optional 'range') or 'x', 'y', and 'bin_widths'.")
 
-        if np.any(cost_instance.y() == 0):
+        y_data = cost_instance.y()
+        if np.any(y_data == 0):
             if zero_method == 'absolute':
-                condition = cost_instance.y > 0
-                y_star = np.where(cost_instance.y>0, cost_instance.y, 1)
+                y_star = const(np.where(y_data > 0, y_data, 1))
                 # Scale model predictions by bin width
                 cost_instance.fcn = lambda model: np.sum(
                     ((cost_instance.y - (model % cost_instance.x) * cost_instance.bin_widths) ** 2) / y_star
                 )
                 return cost_instance
             raise ValueError("Chi2 calculation requires that all observed counts (y) be non-zero unless zero_method is set to 'absolute'.")
-        
         # Scale model predictions by bin width for proper chi-squared
         cost_instance.fcn = lambda model: Model(
             np.sum, 
@@ -301,7 +300,7 @@ class Cost:
 
         # Scale model predictions by bin width
         cost_instance.fcn = lambda model: 2 * np.sum(
-            (model % cost_instance.x) * cost_instance.bin_widths - 
+            (model % cost_instance.x) * cost_instance.bin_widths -
             cost_instance.y * np.log((model % cost_instance.x) * cost_instance.bin_widths)
         )
         return cost_instance

@@ -7,7 +7,7 @@ step: state -> state
 """
 
 import numpy as np
-from fitle import INPUT, const, indecise, vector, concat, Model
+from fitle import INPUT, const, vector, concat, Model
 
 
 def iterate(model, n):
@@ -20,10 +20,10 @@ def iterate(model, n):
     loop.__name__ = f'iterate[{n}]'
     return Model(loop, [INPUT])
 
-# State
-x0, x1, x2 = indecise(INPUT, 0), indecise(INPUT, 1), indecise(INPUT, 2)
-v0, v1, v2 = indecise(INPUT, 3), indecise(INPUT, 4), indecise(INPUT, 5)
-t = indecise(INPUT, 6)
+# State - select elements from INPUT
+x0, x1, x2 = INPUT[0], INPUT[1], INPUT[2]
+v0, v1, v2 = INPUT[3], INPUT[4], INPUT[5]
+t = INPUT[6]
 x, v = vector(x0, x1, x2), vector(v0, v1, v2)
 
 # Fields

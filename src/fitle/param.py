@@ -320,6 +320,19 @@ class _Param:
         return Model(inner, list(args))
 
     # ------------------------------------------------------------------
+    #   Indexing
+    # ------------------------------------------------------------------
+
+    def __getitem__(self, key):
+        """Select element from this param by index.
+
+        INPUT[0] returns a Model that selects element 0 from the input array.
+        INPUT[idx] where idx is an INDEX param returns a Model for dynamic indexing.
+        """
+        from .model import _indecise
+        return _indecise(self, key)
+
+    # ------------------------------------------------------------------
     #   String representations
     # ------------------------------------------------------------------
 
