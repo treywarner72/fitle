@@ -79,12 +79,14 @@ def _split_top_level_commas(s: str) -> list[str]:
 def _is_simple_param_expr(rhs: str) -> bool:
     """Check if RHS contains only simple Param expressions.
 
-    Matches: ~Param, +Param, -Param, Param(5), Param.positive('x'), etc.
+    Matches: ~Param, +Param, -Param, Param(5), Param.positive('x'), (+Param)(5), etc.
     Does NOT match: Param(5) + Param(3), gaussian(Param()), etc.
     """
     import re
-    # Pattern: optional unary op (~, +, -), identifier with optional .attr, followed by optional () chains
-    pattern = r'^\s*[~+\-]?\s*\w+(\.\w+)?(\(.*?\))*\s*$'
+    # Pattern options:
+    # 1. Optional unary op, identifier with optional .attr, followed by optional () chains
+    # 2. Parenthesized unary expression like (+Param) followed by () chains
+    pattern = r'^\s*([~+\-]?\s*\w+(\.\w+)?|\([~+\-]\s*\w+(\.\w+)?\))(\(.*?\))*\s*$'
     parts = _split_top_level_commas(rhs)
     return all(re.match(pattern, part.strip()) for part in parts)
 
