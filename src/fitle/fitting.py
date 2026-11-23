@@ -30,7 +30,6 @@ import iminuit
 import warnings
 from .model import Model, const
 from .param import Param, _Param
-import matplotlib.pyplot as plt
 
 
 class _FittingContext:
@@ -231,6 +230,11 @@ class FitResult:
         ValueError
             If this is an unbinned fit (no y-data).
         """
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            raise ImportError("plotting needs matplotlib")
+        from None
         if self.y is None:
             raise ValueError("plot_data() not available for unbinned fits")
         plt.errorbar(self.x, self.y, linestyle='', marker='.', color='black', yerr=np.sqrt(self.y))
@@ -246,6 +250,11 @@ class FitResult:
         ValueError
             If this is an unbinned fit (no y-data).
         """
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            raise ImportError("plotting needs matplotlib")
+        from None
         if self.y is None:
             raise ValueError("plot_fit() not available for unbinned fits")
         plt.plot(self.x, self.predict(self.x))
