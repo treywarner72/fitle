@@ -234,7 +234,6 @@ class FitResult:
             import matplotlib.pyplot as plt
         except ImportError:
             raise ImportError("plotting needs matplotlib")
-        from None
         if self.y is None:
             raise ValueError("plot_data() not available for unbinned fits")
         plt.errorbar(self.x, self.y, linestyle='', marker='.', color='black', yerr=np.sqrt(self.y))
@@ -253,8 +252,7 @@ class FitResult:
         try:
             import matplotlib.pyplot as plt
         except ImportError:
-            raise ImportError("plotting needs matplotlib")
-        from None
+            raise ImportError("plotting needs matplotlib") 
         if self.y is None:
             raise ValueError("plot_fit() not available for unbinned fits")
         plt.plot(self.x, self.predict(self.x))
