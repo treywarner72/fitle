@@ -32,7 +32,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 from .model import Model, const
-from .param import INPUT
+from .param import INPUT, Param
 
 class Cost:
     """
@@ -44,9 +44,10 @@ class Cost:
 
     Attributes:
         x (const): Constant representation of the independent variable data.
-        y (const, optional): Constant representation of the dependent variable data
-                             (observed counts/values). `None` for some NLL cases.
-        bin_widths (const, optional): Constant representation of bin widths for binned data.
+        y (DATA param, optional): Runtime data slot for the dependent variable data
+                             (observed counts/values); ``y()`` returns the array.
+                             `None` for some NLL cases.
+        bin_widths (DATA param, optional): Runtime data slot for bin widths of binned data.
     """
     def __init__(self, x_data, y_data=None, bin_widths=None):
         # Convert lists to numpy arrays for consistency
@@ -74,8 +75,11 @@ class Cost:
                 )
 
         self.x = const(x_data)
-        self.y = const(y_data) if y_data is not None else None
-        self.bin_widths = const(bin_widths) if bin_widths is not None else None
+        # Observed data are runtime DATA slots, not baked-in constants, so
+        # refitting the same model to new data reuses the compiled function.
+        # Calling them (self.y()) still returns the array.
+        self.y = Param.data(y_data, "y") if y_data is not None else None
+        self.bin_widths = Param.data(bin_widths, "bin_widths") if bin_widths is not None else None
         self.fcn = self._base_fcn # Assign the method to the attribute
 
     def _base_fcn(self, *args):
@@ -255,7 +259,7 @@ class Cost:
         y_data = cost_instance.y()
         if np.any(y_data == 0):
             if zero_method == 'absolute':
-                y_star = const(np.where(y_data > 0, y_data, 1))
+                y_star = Param.data(np.where(y_data > 0, y_data, 1), "y_star")
                 # Keep INPUT - model evaluated at x passed at runtime
                 cost_instance.fcn = lambda model: np.sum(
                     ((cost_instance.y - model * cost_instance.bin_widths) ** 2) / y_star

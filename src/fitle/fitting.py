@@ -59,6 +59,8 @@ class _FittingContext:
 
         # Get x data from model.memory if present (for cost models that preserve INPUT)
         self._x_data = model.memory.get('_eval_x', None)
+        # Runtime data slots (DATA params), passed to the compiled function
+        self._data = model.data_values()
 
         if use_numba:
             # Pre-compute hash and get compiled function
@@ -100,7 +102,7 @@ class _FittingContext:
             if self._has_indices and index_map:
                 index_list = [index_map[p] for p in self._index_params]
             # Pass x_data (from cost model memory) to compiled function
-            return self._compiled_fn(self._x_data, index_list, self.theta)
+            return self._compiled_fn(self._x_data, self._data, index_list, self.theta)
         else:
             return self._model.eval_py(self._x_data, index_map or {})
 

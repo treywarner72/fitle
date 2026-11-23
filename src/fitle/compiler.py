@@ -23,12 +23,17 @@ The compilation process has four stages:
 
 The compiled function signature is::
 
-    compiled(x, indices, theta) -> result
+    compiled(x, data, indices, theta) -> result
 
 Where:
 - ``x``: Input data array (or None)
+- ``data``: Tuple of DATA-param arrays, ``model.data_values()`` (``()`` if none)
 - ``indices``: List of current index values for INDEX params
 - ``theta``: Array of parameter values in tree-walk order
+
+Plain arrays and ``const(...)`` values are baked into the compiled code (and
+hashed by value). DATA params are not: they are read from ``data`` at call
+time, so models that differ only in their data share one compiled function.
 """
 from __future__ import annotations
 
@@ -135,6 +140,7 @@ class Compiler:
         self._hoisted_fns   : dict = {}
         self._fn_to_name    : dict = {}  # id(fn) -> name for O(1) lookup
         self._param_to_idx = {p: i for i, p in enumerate(root.params)}
+        self._data_to_idx  = {p: i for i, p in enumerate(root.data_params)}
         self._alias_pattern = None    # compiled regex for alias substitution
         self._alias_map_id = None     # id of last alias_map for cache invalidation
 
@@ -151,7 +157,7 @@ class Compiler:
         -------
         callable
             A Numba ``@njit`` compiled function with signature
-            ``compiled(x, indices, theta) -> result``.
+            ``compiled(x, data, indices, theta) -> result``.
 
         Raises
         ------
@@ -262,13 +268,22 @@ class Compiler:
             # Need explicit array construction
             theta_expr = f"np.array([{', '.join(f'theta[{i}]' for i in indices)}])"
 
+        # Map the sub-model's data slots onto the parent's
+        sub_data = model.data_params
+        if any(p not in self._data_to_idx for p in sub_data):
+            return None
+        if sub_data:
+            data_expr = "(" + "".join(f"data[{self._data_to_idx[p]}], " for p in sub_data) + ")"
+        else:
+            data_expr = "()"
+
         # Hoist the compiled function
         compiled_fn = Model._compiled_cache[model_hash]
         fn_name = f"_compiled_{id(model)}"
         self._hoisted_fns[fn_name] = compiled_fn
 
         # Generate the call expression
-        expr = f"{fn_name}(x, None, {theta_expr})"
+        expr = f"{fn_name}(x, {data_expr}, None, {theta_expr})"
 
         node = _IRNode(expr, frozenset())  # No INDEX deps
         node.model = model
@@ -306,6 +321,8 @@ class Compiler:
                 node = _IRNode(f"theta[{idx}]", frozenset())
             elif model is INPUT:
                 node = _IRNode("x", frozenset())
+            elif model.kind == _Param.data:
+                node = _IRNode(f"data[{self._data_to_idx[model]}]", frozenset())
             elif model.kind == _Param.index:
                 # Leaf that will be replaced by the loop variable.
                 var = self._idx_var(model)
@@ -512,6 +529,8 @@ class Compiler:
         # shape_obj is a Model (symbolic). Use its aliased expression
         if shape_obj is INPUT:
             return f"np.zeros_like(x, dtype=np.float64)"
+        if isinstance(shape_obj, _Param) and shape_obj.kind is _Param.data:
+            return f"np.zeros(data[{self._data_to_idx[shape_obj]}].shape)"
         raise ValueError(f"Cannot determine shape for {obj}")
 
     # ------------------------------------------------------------------ #
@@ -528,7 +547,7 @@ class Compiler:
         tuple[str, dict]
             (source_code, namespace) ready for ``exec()`` and ``@njit``.
         """
-        lines = ["def compiled(x, indices, theta):"]
+        lines = ["def compiled(x, data, indices, theta):"]
         ns    = {"np": np}
         ns.update(self._hoisted_fns)
         ns.update(self._hoisted_consts)
@@ -671,7 +690,7 @@ def _compile(self, eager: bool = True) -> Model:
             indices = [0] * len(index_params) if index_params else None
 
             try:
-                compiled_fn(x, indices, theta)
+                compiled_fn(x, self.data_values(), indices, theta)
             except Exception:
                 pass  # Ignore errors during warmup (e.g., domain errors)
 

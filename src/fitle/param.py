@@ -45,6 +45,7 @@ class ParamKind(Enum):
     THETA = auto()   #: free, optimisable parameter
     INPUT = auto()   #: singleton placeholder for X
     INDEX = auto()   #: integer loop variable (carries :class:`range`)
+    DATA  = auto()   #: runtime data array (passed to compiled code, not baked in)
 
 
 # -----------------------------------------------------------------------------
@@ -175,15 +176,19 @@ def _detect_varname(depth: int = 2) -> str | None:
 class _Param:
     """Internal parameter class. Use `Param` builder to create instances.
 
-    Three mutually-exclusive roles:
+    Four mutually-exclusive roles:
     - THETA: Free parameter for optimization (has min/max/start/value)
     - INPUT: Placeholder for input data
     - INDEX: Integer loop variable (has range)
+    - DATA:  Runtime data array (``value`` holds the array). Compiled code
+      receives it as an argument instead of baking it in, so models that
+      differ only in their data share one compiled function.
     """
 
     theta = ParamKind.THETA
     input = ParamKind.INPUT
     index = ParamKind.INDEX
+    data  = ParamKind.DATA
 
     def __init__(
         self,
@@ -194,6 +199,7 @@ class _Param:
         *,
         kind: ParamKind = ParamKind.THETA,
         range: range | None = None,
+        value=None,
     ):
         self.kind = kind
         self.name = name
@@ -203,6 +209,13 @@ class _Param:
 
         if kind is ParamKind.INDEX:
             self.range = range
+            return
+
+        if kind is ParamKind.DATA:
+            if value is None:
+                raise ValueError("A DATA param needs an array value.")
+            self.range = None
+            self.value = np.asarray(value)
             return
 
         # THETA
@@ -224,8 +237,15 @@ class _Param:
 
         self.value = self.start
 
-    def __call__(self, arg0: str | float, arg1: float | None = None) -> '_Param':
-        """Chain configuration: param('name'), param(5), param(0, 10)."""
+    def __call__(self, arg0: str | float | None = None, arg1: float | None = None) -> '_Param':
+        """Chain configuration: param('name'), param(5), param(0, 10).
+
+        For a DATA param, calling with no arguments returns its array.
+        """
+        if self.kind is ParamKind.DATA:
+            if arg0 is None and arg1 is None:
+                return self.value
+            raise TypeError("A DATA param takes no arguments; call it as p() to get its array.")
         if arg1 is not None:
             # Set bounds
             new_min, new_max = float(arg0), float(arg1)
@@ -348,6 +368,8 @@ class _Param:
             if self.range is None:
                 return "INDEX"
             return f"{self._prefix()}{self.range}"
+        if self.kind is self.data:
+            return f"{self._prefix()}DATA(shape={self.value.shape}, dtype={self.value.dtype})"
         if self.min == self.max:
             return f"{self._prefix()}_Param(value={self.value})"
         return (
@@ -362,6 +384,8 @@ class _Param:
             if self.range is None:
                 return "INDEX"
             return f"{self._prefix()}{self.range}"
+        if self.kind is self.data:
+            return self.name or "DATA"
         if hasattr(self, "error"):
             return f"{self._prefix()}{self.value:.4g} ± {self.error:.2g}"
         return f"{self._prefix()}{self.value:.4g}"
@@ -524,9 +548,33 @@ class _UnitBuilder:
         return "Param.unit"
 
 
+class _DataBuilder:
+    """Builder for runtime data slots: Param.data(array) or Param.data(array, 'name').
+
+    Use for arrays that change between fits of the same model (observed
+    counts, per-event weights or errors, ...). The array is passed to the
+    compiled function at call time instead of being baked into it, so
+    refitting the same model structure to new data does not recompile.
+    Arrays that are a fixed part of the model should stay as plain arrays
+    or ``const(...)``.
+    """
+    def __call__(self, value, name: str | None = None) -> _Param:
+        if isinstance(value, _Param) or not hasattr(value, '__len__'):
+            raise TypeError(
+                f"Param.data expects an array, got {type(value).__name__}"
+            )
+        if name is None:
+            name = _detect_varname(depth=2)
+        return _Param(name=name, kind=ParamKind.DATA, value=value)
+
+    def __repr__(self) -> str:
+        return "Param.data"
+
+
 Param.positive = _PositiveBuilder()
 Param.negative = _NegativeBuilder()
 Param.unit = _UnitBuilder()
+Param.data = _DataBuilder()
 
 
 # -----------------------------------------------------------------------------

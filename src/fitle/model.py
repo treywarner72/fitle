@@ -168,7 +168,7 @@ class Model:
                     walk(item)
             elif isinstance(m, (int, float, np.number)):
                 return
-            elif isinstance(m, _Param) and m.kind not in (_Param.input, _Param.index):
+            elif isinstance(m, _Param) and m.kind is _Param.theta:
                 if m not in seen:
                     seen.add(m)
                     flat.append(m)
@@ -176,6 +176,38 @@ class Model:
         walk(self)
         self._cached_params = flat
         return flat
+
+    @property
+    def data_params(self):
+        """A list of the DATA params (runtime data slots) in tree-walk order.
+
+        Slot ``k`` in compiled code (``data[k]``) is ``data_params[k]``.
+        """
+        if hasattr(self, '_cached_data_params'):
+            return self._cached_data_params
+
+        flat = []
+        seen = set()
+
+        def walk(m):
+            if isinstance(m, Model):
+                for arg in m.args:
+                    walk(arg)
+            elif isinstance(m, Iterable) and not isinstance(m, (str, bytes, np.ndarray)):
+                for item in m:
+                    walk(item)
+            elif isinstance(m, _Param) and m.kind is _Param.data:
+                if m not in seen:
+                    seen.add(m)
+                    flat.append(m)
+
+        walk(self)
+        self._cached_data_params = flat
+        return flat
+
+    def data_values(self) -> tuple:
+        """Tuple of the current arrays of ``data_params``, as passed to compiled code."""
+        return tuple(p.value for p in self.data_params)
 
     @property
     def free(self):
@@ -219,8 +251,14 @@ class Model:
         if hasattr(self, '_cached_hash'):
             return self._cached_hash
 
+        # DATA params hash by slot number + array type, never by contents:
+        # compiled code reads them from its `data` argument.
+        data_slot = {p: i for i, p in enumerate(self.data_params)}
+
         def walk(m):
             if isinstance(m, _Param):
+                if m.kind is _Param.data:
+                    return ("data", data_slot[m], m.value.ndim, m.value.dtype.str)
                 return ("param", m.kind)
             elif isinstance(m, Reduction):
                 return ("reduce", walk(m.model), hash(m.index), m.op.__name__)
@@ -350,9 +388,11 @@ class Model:
                     return x
                 if m.kind == _Param.index:
                     return index_map[m]
+                if m.kind == _Param.data:
+                    return m.value
                 raise ValueError(
                     f"Unknown parameter kind: {m.kind!r}.\n"
-                    f"  Expected: _Param.theta, _Param.input, or _Param.index.\n"
+                    f"  Expected: _Param.theta, _Param.input, _Param.index, or _Param.data.\n"
                     f"  This usually indicates a corrupted Param object."
                 )
             return m
@@ -402,7 +442,7 @@ class Model:
 
         current_hash = hash(self) # Hash depends on symbolic structure
         if current_hash in Model._compiled_cache:
-            return Model._compiled_cache[current_hash](x, index_list, theta)
+            return Model._compiled_cache[current_hash](x, self.data_values(), index_list, theta)
         else:
             if numba:
                 raise AttributeError("No compiled function in cache")
@@ -538,7 +578,7 @@ class Model:
         Creates a new Model with:
         - All Model/Reduction nodes recreated as new instances
         - THETA Params cloned into new Param instances (preserving values)
-        - INPUT/INDEX Params shared (same singletons)
+        - INPUT/INDEX/DATA Params shared (same objects)
         - Lists/tuples inside args recursively copied
 
         Returns
@@ -563,8 +603,8 @@ class Model:
 
             # --- Params ---
             if isinstance(node, _Param):
-                # Keep INPUT/INDEX singletons shared
-                if node.kind in (_Param.input, _Param.index):
+                # Keep INPUT/INDEX singletons and DATA slots shared
+                if node.kind in (_Param.input, _Param.index, _Param.data):
                     return node
 
                 # Clone θ-params, reusing mapping so they stay consistent
@@ -1333,6 +1373,10 @@ def shape(obj: Any) -> tuple | _Param:
 
     if obj is INPUT:
         return INPUT                       # e.g. you called shape(X) directly
+
+    if isinstance(obj, _Param) and obj.kind is _Param.data:
+        # Symbolic, like INPUT: the real shape is only known at call time
+        return obj if obj.value.ndim else ()
 
     if isinstance(obj, _Param):
         return ()                      # θ_k etc. are scalars
