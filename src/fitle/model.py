@@ -261,6 +261,16 @@ class Model:
         # must not share code. DATA also hashes its array type, never contents.
         theta_slot = {p: i for i, p in enumerate(self.params)}
         data_slot = {p: i for i, p in enumerate(self.data_params)}
+        # INDEX params likewise hash by order of first appearance plus their
+        # range (which is baked into the loop), never by object identity:
+        # convolve() makes a fresh index() per call, and each toy's model
+        # must still share one compiled function.
+        index_slot = {}
+
+        def index_key(p):
+            r = p.range
+            return ("index", index_slot.setdefault(p, len(index_slot)),
+                    (r.start, r.stop, r.step) if r is not None else None)
 
         def walk(m):
             if isinstance(m, _Param):
@@ -268,9 +278,12 @@ class Model:
                     return ("theta", theta_slot[m])
                 if m.kind is _Param.data:
                     return ("data", data_slot[m], m.value.ndim, m.value.dtype.str)
+                if m.kind is _Param.index:
+                    return index_key(m)
                 return ("param", m.kind)
             elif isinstance(m, Reduction):
-                return ("reduce", walk(m.model), hash(m.index), m.op.__name__)
+                idx = index_key(m.index)
+                return ("reduce", walk(m.model), idx, m.op.__name__)
             elif isinstance(m, Model):
                 fn = m.fn
 
