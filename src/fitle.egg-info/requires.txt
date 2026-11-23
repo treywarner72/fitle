@@ -1,7 +1,0 @@
-numpy
-numba
-iminuit
-
-[dev]
-pytest
-matplotlib

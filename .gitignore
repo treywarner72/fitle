@@ -11,3 +11,5 @@ Icon?
 # Generated files
 *.png
 *.egg-info/
+dist/
+build/
