@@ -246,17 +246,26 @@ class Model:
 
     def __hash__(self):
         """Two equal-hashed models may have different parameters, but if you use the same scalars for those parameters, they will give the same output.
+
+        Parameters are identified by slot (position in ``params`` /
+        ``data_params``), not by object, so models of the same structure
+        share compiled code while ``a*a`` and ``a*b`` do not.
         """
         # Return cached hash if available (models are effectively immutable)
         if hasattr(self, '_cached_hash'):
             return self._cached_hash
 
-        # DATA params hash by slot number + array type, never by contents:
-        # compiled code reads them from its `data` argument.
+        # THETA and DATA params hash by slot number (their position in
+        # params / data_params), which is exactly how compiled code addresses
+        # them (theta[k], data[k]). This keeps aliasing apart: a*a and a*b
+        # must not share code. DATA also hashes its array type, never contents.
+        theta_slot = {p: i for i, p in enumerate(self.params)}
         data_slot = {p: i for i, p in enumerate(self.data_params)}
 
         def walk(m):
             if isinstance(m, _Param):
+                if m.kind is _Param.theta:
+                    return ("theta", theta_slot[m])
                 if m.kind is _Param.data:
                     return ("data", data_slot[m], m.value.ndim, m.value.dtype.str)
                 return ("param", m.kind)

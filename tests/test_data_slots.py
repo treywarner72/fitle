@@ -187,3 +187,31 @@ class TestCompilerPaths:
         assert "_compiled_" in outer.code       # really went through reuse
         assert outer() == pytest.approx(3 * 6 + 2 * 60)
         assert outer() == pytest.approx(outer.eval_py(None, {}))
+
+
+class TestThetaSlotIdentity:
+    """Regression: the cache key used to treat all THETA params as one,
+    so a*b was served the compiled code of a*a."""
+
+    def test_aliased_vs_distinct_theta(self):
+        a, b = Param("a")(2.0), Param("b")(3.0)
+        same = a * a * INPUT
+        diff = a * b * INPUT
+        assert hash(same) != hash(diff)
+        same.compile()
+        x = np.array([1.0])
+        assert diff(x) == pytest.approx([6.0])
+        assert diff(x) == pytest.approx(diff.eval_py(x, {}))
+
+    def test_order_of_use_matters(self):
+        a, b = Param("a")(2.0), Param("b")(3.0)
+        m1 = a - b * a          # params [a, b]: theta0 - theta1*theta0
+        m2 = a - b * b          # params [a, b]: theta0 - theta1*theta1
+        assert hash(m1) != hash(m2)
+        m1.compile()
+        assert m2() == pytest.approx(2.0 - 9.0)
+
+    def test_fresh_params_same_structure_still_share(self):
+        def build():
+            return Param("a")(1.0) * INPUT + Param("b")(2.0)
+        assert hash(build()) == hash(build())
